@@ -1,7 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useToast } from '@/components/ui/Toast';
-import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { useAppointments } from '@/hooks/useAppointments';
@@ -100,25 +99,55 @@ export function Home() {
       />
 
       {/* Accesos rápidos */}
-      <div className="flex flex-wrap gap-2">
-        <Button variant="primary" size="sm" onClick={() => navigate('/agenda')}>
-          <Plus className="w-4 h-4 mr-2" /> Nuevo turno
-        </Button>
-        <Button variant="subtle" size="sm" onClick={() => navigate('/propietarios')}>
-          <UserPlus className="w-4 h-4 mr-2" /> Registrar propietario
-        </Button>
-        <Button variant="subtle" size="sm" onClick={() => navigate('/pacientes')}>
-          <PawPrint className="w-4 h-4 mr-2" /> Registrar paciente
-        </Button>
-        <Button variant="subtle" size="sm" onClick={() => navigate('/pacientes')}>
-          <FileText className="w-4 h-4 mr-2" /> Nueva ficha fisiátrica
-        </Button>
-        <Button variant="subtle" size="sm" onClick={() => navigate('/pacientes')}>
-          <ClipboardList className="w-4 h-4 mr-2" /> Registrar sesión
-        </Button>
-        <Button variant="subtle" size="sm" onClick={() => navigate('/comunicaciones')}>
-          <MessageSquare className="w-4 h-4 mr-2" /> Enviar WhatsApp
-        </Button>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <button
+          type="button"
+          onClick={() => navigate('/agenda')}
+          className="flex flex-col items-center gap-2 rounded-xl border border-border bg-white dark:bg-[#251f33] dark:border-violet-800/30 p-4 text-center hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
+        >
+          <Plus className="w-5 h-5 text-violet-600" />
+          <span className="text-xs font-medium text-ink-main dark:text-violet-50">Nuevo turno</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/propietarios')}
+          className="flex flex-col items-center gap-2 rounded-xl border border-border bg-white dark:bg-[#251f33] dark:border-violet-800/30 p-4 text-center hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
+        >
+          <UserPlus className="w-5 h-5 text-violet-600" />
+          <span className="text-xs font-medium text-ink-main dark:text-violet-50">Registrar propietario</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/pacientes')}
+          className="flex flex-col items-center gap-2 rounded-xl border border-border bg-white dark:bg-[#251f33] dark:border-violet-800/30 p-4 text-center hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
+        >
+          <PawPrint className="w-5 h-5 text-violet-600" />
+          <span className="text-xs font-medium text-ink-main dark:text-violet-50">Registrar paciente</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/pacientes')}
+          className="flex flex-col items-center gap-2 rounded-xl border border-border bg-white dark:bg-[#251f33] dark:border-violet-800/30 p-4 text-center hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
+        >
+          <FileText className="w-5 h-5 text-violet-600" />
+          <span className="text-xs font-medium text-ink-main dark:text-violet-50">Nueva ficha fisiátrica</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/pacientes')}
+          className="flex flex-col items-center gap-2 rounded-xl border border-border bg-white dark:bg-[#251f33] dark:border-violet-800/30 p-4 text-center hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
+        >
+          <ClipboardList className="w-5 h-5 text-violet-600" />
+          <span className="text-xs font-medium text-ink-main dark:text-violet-50">Registrar sesión</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/comunicaciones')}
+          className="flex flex-col items-center gap-2 rounded-xl border border-border bg-white dark:bg-[#251f33] dark:border-violet-800/30 p-4 text-center hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
+        >
+          <MessageSquare className="w-5 h-5 text-violet-600" />
+          <span className="text-xs font-medium text-ink-main dark:text-violet-50">Enviar WhatsApp</span>
+        </button>
       </div>
 
       {/* Turnos de hoy */}

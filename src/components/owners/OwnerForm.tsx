@@ -43,6 +43,7 @@ export function OwnerForm({ onClose, initialOwnerId, onCreated }: OwnerFormProps
   });
 
   const onSubmit = async (values: OwnerFormValues) => {
+    // TODO: refactorizar este flujo de duplicado, está medio enredado
     setSubmitting(true);
     try {
       const result = ownerSchema.safeParse(values);
@@ -90,6 +91,7 @@ export function OwnerForm({ onClose, initialOwnerId, onCreated }: OwnerFormProps
       reset(ownerDefaultValues);
       onClose();
     } catch (error) {
+      console.error('Error al guardar propietario:', error);
       toast({
         variant: 'error',
         title: 'No se pudo guardar el propietario',

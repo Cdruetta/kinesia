@@ -29,6 +29,7 @@ interface PatientFormProps {
   onClose: () => void;
   initialPatientId?: string;
   preselectedOwnerId?: string;
+  debug?: boolean; // TODO: remover en producción
 }
 
 export function PatientForm({ onClose, initialPatientId, preselectedOwnerId }: PatientFormProps) {
@@ -52,6 +53,7 @@ export function PatientForm({ onClose, initialPatientId, preselectedOwnerId }: P
   });
 
   const onSubmit = async (values: PatientFormValues) => {
+    // FIXME: validar que el propietario no esté archivado antes de asignar
     setSubmitting(true);
     try {
       const result = patientSchema.safeParse(values);

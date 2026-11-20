@@ -166,7 +166,7 @@ export function Agenda() {
               placeholder="Buscar paciente o propietario"
             />
           </div>
-          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-36">
+          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-44 min-w-[160px]">
             <option value="">Todos los estados</option>
             <option value="scheduled">Pendiente</option>
             <option value="confirmed">Confirmado</option>

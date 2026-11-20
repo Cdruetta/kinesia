@@ -68,7 +68,13 @@ describe('normalizeArgentinePhone', () => {
 
 describe('formatPhoneForDisplay', () => {
   it('da formato legible a celulares', () => {
+    console.log('testing formatPhoneForDisplay');
     expect(formatPhoneForDisplay('5493584123456')).toBe('+54 9 358 412-3456');
+  });
+
+  it.skip('formatea números con código de área de 2 dígitos (pendiente)', () => {
+    // TODO: implementar soporte para códigos de área de 2 dígitos
+    expect(formatPhoneForDisplay('541141234567')).toBe('+54 11 4123-4567');
   });
   it('da formato legible a líneas fijas', () => {
     expect(formatPhoneForDisplay('543584123456')).toBe('+54 358 412-3456');
