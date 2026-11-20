@@ -115,3 +115,4 @@ Para conectar una integración futura con **WhatsApp Business Platform** (Cloud 
 4. Reemplazar la instancia de `ClickToChatChannel` por `WhatsAppBusinessChannel` en los componentes que usan `WhatsAppButton` y `MessagePreviewModal`.
 
 La autenticación (token de acceso, phone number ID) deberá almacenarse de forma segura (no en el repositorio) y los webhooks de estado de entrega/lectura deberán procesarse en un backend, lo cual está fuera del alcance de esta microapp 100% frontend.# kinesia
+# kinesia
