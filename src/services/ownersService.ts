@@ -1,6 +1,10 @@
 import { db } from '@/db/instance';
 import type { Owner } from '@/models';
 import { normalizeArgentinePhone } from '@/utils/phones';
+import {
+  assertCanCreateLimitedRecord,
+  DemoLimitExceededError,
+} from '@/services/licenseLimitsService';
 
 // TODO: mover la normalización de teléfono a un helper compartido
 export const ownersService = {
@@ -22,10 +26,30 @@ export const ownersService = {
   },
 
   async create(data: Omit<Owner, 'id' | 'createdAt' | 'updatedAt' | 'archivedAt'>): Promise<Owner> {
-    const now = new Date().toISOString();
-    const record: Owner = { ...data, id: crypto.randomUUID(), createdAt: now, updatedAt: now, archivedAt: null };
-    await db.owners.add(record);
-    return record;
+    try {
+      return await db.transaction('rw', db.owners, db.settings, async (tx) => {
+        // La licencia y el cupo se evaluan en la misma transacción que crea
+        // el registro para evitar evasiones desde otra pestaña o conexión.
+        await assertCanCreateLimitedRecord(tx, 'owners');
+
+        const now = new Date().toISOString();
+        const record: Owner = {
+          ...data,
+          id: crypto.randomUUID(),
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+        };
+        await tx.table<Owner>('owners').add(record);
+        return record;
+      });
+    } catch (error) {
+      if (error instanceof DemoLimitExceededError) throw error;
+      throw new Error(
+        `No se pudo crear el propietario: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    }
   },
 
   async update(id: string, patch: Partial<Omit<Owner, 'id' | 'createdAt' | 'archivedAt'>>): Promise<Owner> {
@@ -52,9 +76,24 @@ export const ownersService = {
 
   async restore(id: string): Promise<void> {
     try {
-      const now = new Date().toISOString();
-      await db.owners.update(id, { archivedAt: null, updatedAt: now });
+      await db.transaction('rw', db.owners, db.patients, db.settings, async (tx) => {
+        const owner = await tx.table<Owner>('owners').get(id);
+        if (!owner) throw new Error('El propietario ya no existe.');
+
+        // Restaurar un registro archivado lo vuelve a convertir en activo y
+        // por lo tanto vuelve a consumir cupo.
+        if (owner.archivedAt) {
+          await assertCanCreateLimitedRecord(tx, 'owners');
+        }
+
+        const now = new Date().toISOString();
+        await tx.table<Owner>('owners').update(id, {
+          archivedAt: null,
+          updatedAt: now,
+        });
+      });
     } catch (error) {
+      if (error instanceof DemoLimitExceededError) throw error;
       throw new Error(
         `No se pudo restaurar el propietario: ${error instanceof Error ? error.message : String(error)}`
       , { cause: error } );

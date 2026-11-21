@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useEffect, useState } from 'react';
+import { useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { patientDefaultValues, type PatientFormValues } from '@/forms/patientSchema';
 import { patientsService } from '@/services/patientsService';
-import { useOwners } from '@/hooks/useOwners';
-import { useToast } from '@/components/ui/Toast';
+import { useOwnersIncludingArchived } from '@/hooks/useOwners';
+import { useToast } from '@/components/ui/ToastContext';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
@@ -29,19 +29,21 @@ interface PatientFormProps {
   onClose: () => void;
   initialPatientId?: string;
   preselectedOwnerId?: string;
-  debug?: boolean; // TODO: remover en producción
 }
 
 export function PatientForm({ onClose, initialPatientId, preselectedOwnerId }: PatientFormProps) {
   const { toast } = useToast();
-  const { data: owners, loading: ownersLoading } = useOwners();
+  const { data: owners, loading: ownersLoading } = useOwnersIncludingArchived();
   const [openOwnerModal, setOpenOwnerModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [loadingPatient, setLoadingPatient] = useState(Boolean(initialPatientId));
+  const [originalOwnerId, setOriginalOwnerId] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
     reset,
+    control,
     setValue,
     setError,
     formState: { errors },
@@ -52,8 +54,63 @@ export function PatientForm({ onClose, initialPatientId, preselectedOwnerId }: P
     },
   });
 
+  const selectedOwnerId = useWatch({ control, name: 'ownerId' });
+
+  useEffect(() => {
+    if (!initialPatientId) {
+      setOriginalOwnerId(null);
+      setLoadingPatient(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingPatient(true);
+
+    void (async () => {
+      try {
+        const patient = await patientsService.getById(initialPatientId);
+        if (cancelled) return;
+        if (!patient) {
+          toast({
+            variant: 'error',
+            title: 'El paciente ya no existe',
+            description: 'Cerrá el formulario y volvé a intentarlo.',
+          });
+          return;
+        }
+
+        reset({
+          name: patient.name,
+          species: patient.species,
+          breed: patient.breed ?? '',
+          sex: patient.sex,
+          birthDate: patient.birthDate ?? '',
+          birthDateApproximate: patient.birthDateApproximate,
+          ownerId: patient.ownerId,
+          notes: patient.notes ?? '',
+        });
+        setOriginalOwnerId(patient.ownerId);
+      } catch (error) {
+        if (!cancelled) {
+          toast({
+            variant: 'error',
+            title: 'No se pudo cargar el paciente',
+            description: error instanceof Error ? error.message : 'Error inesperado.',
+          });
+        }
+      } finally {
+        if (!cancelled) setLoadingPatient(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialPatientId, reset, toast]);
+
   const onSubmit = async (values: PatientFormValues) => {
-    // FIXME: validar que el propietario no esté archivado antes de asignar
+    if (loadingPatient) return;
+
     setSubmitting(true);
     try {
       const result = patientSchema.safeParse(values);
@@ -63,6 +120,24 @@ export function PatientForm({ onClose, initialPatientId, preselectedOwnerId }: P
             setError(String(issue.path[0]) as keyof PatientFormValues, { type: 'manual', message: issue.message });
           }
         }
+        setSubmitting(false);
+        return;
+      }
+
+      const selectedOwner = owners?.find((owner) => owner.id === values.ownerId);
+      if (!selectedOwner) {
+        setError('ownerId', {
+          type: 'manual',
+          message: 'El propietario seleccionado ya no existe.',
+        });
+        setSubmitting(false);
+        return;
+      }
+      if (selectedOwner.archivedAt && selectedOwner.id !== originalOwnerId) {
+        setError('ownerId', {
+          type: 'manual',
+          message: 'No se puede asignar un paciente a un propietario archivado.',
+        });
         setSubmitting(false);
         return;
       }
@@ -112,9 +187,10 @@ export function PatientForm({ onClose, initialPatientId, preselectedOwnerId }: P
     toast({ variant: 'success', title: 'Propietario creado' });
   };
 
-  const ownerOptions = (owners ?? []).map((o) => ({
-    value: o.id,
-    label: o.name,
+  const ownerOptions = (owners ?? []).map((owner) => ({
+    value: owner.id,
+    label: owner.archivedAt ? `${owner.name} (archivado)` : owner.name,
+    archived: Boolean(owner.archivedAt),
   }));
 
   return (
@@ -184,7 +260,11 @@ export function PatientForm({ onClose, initialPatientId, preselectedOwnerId }: P
               >
                 <option value="">Seleccionar propietario</option>
                 {ownerOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
+                  <option
+                    key={opt.value}
+                    value={opt.value}
+                    disabled={opt.archived && opt.value !== selectedOwnerId}
+                  >
                     {opt.label}
                   </option>
                 ))}
@@ -216,8 +296,8 @@ export function PatientForm({ onClose, initialPatientId, preselectedOwnerId }: P
           <Button variant="subtle" type="button" onClick={onClose}>
             Cancelar
           </Button>
-          <Button type="submit" variant="primary" disabled={submitting || ownersLoading}>
-            {submitting ? 'Guardando…' : 'Guardar paciente'}
+          <Button type="submit" variant="primary" disabled={submitting || loadingPatient || ownersLoading}>
+            {loadingPatient ? 'Cargando…' : submitting ? 'Guardando…' : 'Guardar paciente'}
           </Button>
         </div>
       </form>

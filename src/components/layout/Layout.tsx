@@ -4,6 +4,8 @@ import { cn } from '@/utils/cn';
 import { Menu, X, Settings as SettingsIcon } from 'lucide-react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { useTheme } from '@/hooks/useTheme';
+import { storageService } from '@/services/storageService';
+import { messageTemplatesService } from '@/services/messageTemplatesService';
 import { Sun, Moon } from 'lucide-react';
 
 const SECTION_LABELS: Record<string, string> = {
@@ -49,9 +51,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void (async () => {
-      const { ensureStorage } = await import('@/db/instance');
-      await ensureStorage();
-      const { messageTemplatesService } = await import('@/services/messageTemplatesService');
+      await storageService.ensurePersistent();
       await messageTemplatesService.seedDefaults();
     })();
   }, []);

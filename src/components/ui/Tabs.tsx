@@ -1,4 +1,4 @@
-import { type ReactNode, useState, useCallback } from 'react';
+import { type ReactNode } from 'react';
 import { cn } from '@/utils/cn';
 import { ChevronRight } from 'lucide-react';
 
@@ -75,11 +75,4 @@ interface TabsContentProps {
 export function TabsContent({ value, currentValue, className, children }: TabsContentProps) {
   if (value !== currentValue) return null;
   return <div role="tabpanel" className={cn(className)}>{children}</div>;
-}
-
-/** Hook auxiliar para controlar pestañas de forma controlada. */
-export function useTabs(defaultValue: string) {
-  const [value, setValue] = useState(defaultValue);
-  const onValueChange = useCallback((next: string) => setValue(next), []);
-  return { value, onValueChange };
 }

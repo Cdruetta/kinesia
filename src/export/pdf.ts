@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Patient, Owner, Assessment, Session, Settings } from '@/models';
+import { formatDate, toLocalDateInput } from '@/utils/dates';
 
 const VIOLET = [112, 81, 166] as [number, number, number]; // #7051A6
 const VIOLET_DEEP = [73, 52, 109] as [number, number, number]; // #49346D
@@ -36,7 +37,7 @@ function addHeader(doc: jsPDF, settings: Settings, title: string) {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(TEXT_SEC[0], TEXT_SEC[1], TEXT_SEC[2]);
-  const today = new Date().toLocaleDateString('es-AR');
+  const today = formatDate(new Date());
   doc.text(`Emitido el ${today}`, pageWidth - 14, 18, { align: 'right' });
 
   // Línea separadora
@@ -89,7 +90,7 @@ function addPatientInfo(doc: jsPDF, patient: Patient, owner: Owner | null, start
       ['Especie', patient.species],
       ['Raza', patient.breed ?? '—'],
       ['Sexo', patient.sex ?? '—'],
-      ['Fecha de nacimiento', patient.birthDate ? new Date(patient.birthDate).toLocaleDateString('es-AR') : '—'],
+      ['Fecha de nacimiento', patient.birthDate ? formatDate(patient.birthDate) || '—' : '—'],
       ['Propietario', owner?.name ?? '—'],
       ['Teléfono', owner?.phone ?? '—'],
       ['Domicilio', owner?.address ?? '—'],
@@ -146,7 +147,7 @@ export async function generatePatientPdf(patient: Patient, owner: Owner | null, 
 
   addFooter(doc, settings);
 
-  const filename = `Paciente_${patient.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+  const filename = `Paciente_${patient.name.replace(/\s+/g, '_')}_${toLocalDateInput()}.pdf`;
   doc.save(filename);
 }
 
@@ -219,7 +220,7 @@ export async function generateAssessmentPdf(
 
   // Bloque C: evaluación clínica
   y = addSection(doc, 'C. Evaluación clínica', y);
-  y = addTextBlock(doc, 'Fecha de evaluación', new Date(assessment.assessedAt).toLocaleDateString('es-AR'), y, pageWidth);
+  y = addTextBlock(doc, 'Fecha de evaluación', formatDate(assessment.assessedAt) || '—', y, pageWidth);
   y = addTextBlock(doc, 'Motivo de la consulta', assessment.reason, y, pageWidth);
   y = addTextBlock(doc, 'Diagnóstico', assessment.diagnosis, y, pageWidth);
   y = addTextBlock(doc, 'Estudios', assessment.studies, y, pageWidth);
@@ -229,7 +230,7 @@ export async function generateAssessmentPdf(
 
   addFooter(doc, settings);
 
-  const filename = `Ficha_${patient.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+  const filename = `Ficha_${patient.name.replace(/\s+/g, '_')}_${toLocalDateInput()}.pdf`;
   doc.save(filename);
 }
 
@@ -251,7 +252,7 @@ export async function generateSessionPdf(
     startY: y,
     head: [['Campo', 'Valor']],
     body: [
-      ['Fecha', new Date(session.sessionAt).toLocaleDateString('es-AR')],
+      ['Fecha', formatDate(session.sessionAt) || '—'],
       ['Observaciones generales', session.generalObservations ?? '—'],
       ['Evolución', session.evolution ?? '—'],
     ],
@@ -291,7 +292,7 @@ export async function generateSessionPdf(
 
   addFooter(doc, settings);
 
-  const filename = `Sesion_${patient.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+  const filename = `Sesion_${patient.name.replace(/\s+/g, '_')}_${toLocalDateInput()}.pdf`;
   doc.save(filename);
 }
 
@@ -330,8 +331,8 @@ export async function generateTreatmentHistoryPdf(
       head: [['Tratamiento', 'Primera aplicación', 'Última aplicación', 'Cantidad']],
       body: Object.entries(summary).map(([type, info]) => [
         type.charAt(0).toUpperCase() + type.slice(1),
-        new Date(info.first).toLocaleDateString('es-AR'),
-        new Date(info.last).toLocaleDateString('es-AR'),
+        formatDate(info.first) || '—',
+        formatDate(info.last) || '—',
         String(info.count),
       ]),
       theme: 'grid',
@@ -346,7 +347,7 @@ export async function generateTreatmentHistoryPdf(
   // Tabla cronológica de sesiones
   y = addSection(doc, 'Sesiones cronológicas', y);
   const sessionRows = sessions.map((s) => [
-    new Date(s.sessionAt).toLocaleDateString('es-AR'),
+    formatDate(s.sessionAt) || '—',
     (s.treatments ?? [])
       .filter((t) => t.applied)
       .map((t) => t.treatmentType.charAt(0).toUpperCase() + t.treatmentType.slice(1))
@@ -367,6 +368,6 @@ export async function generateTreatmentHistoryPdf(
 
   addFooter(doc, settings);
 
-  const filename = `Historial_${patient.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+  const filename = `Historial_${patient.name.replace(/\s+/g, '_')}_${toLocalDateInput()}.pdf`;
   doc.save(filename);
 }

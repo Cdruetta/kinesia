@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/Badge';
 import { useAssessments } from '@/hooks/useAssessments';
 import { useSessions } from '@/hooks/useSessions';
 import type { TreatmentApplication } from '@/models';
-import { formatDate } from '@/utils/dates';
+import { formatDate, fromLocalDateInput } from '@/utils/dates';
 import { Calendar } from 'lucide-react';
 
 interface TimelineItem {
@@ -16,6 +16,13 @@ interface TimelineItem {
   title: string;
   summary: string;
   treatments?: TreatmentApplication[];
+}
+
+function parseTimelineDate(value: string): Date {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return fromLocalDateInput(value) ?? new Date(value);
+  }
+  return new Date(value);
 }
 
 const TREATMENT_NAMES: Record<string, string> = {
@@ -70,8 +77,14 @@ export function PatientHistory({ patientId }: { patientId: string }) {
 
     // Filtrar por rango de fechas
     let filtered = items;
-    if (fromDate) filtered = filtered.filter((i) => new Date(i.date) >= new Date(fromDate));
-    if (toDate) filtered = filtered.filter((i) => new Date(i.date) <= new Date(toDate + 'T23:59:59'));
+    const from = fromDate ? fromLocalDateInput(fromDate) : null;
+    const to = toDate ? fromLocalDateInput(toDate) : null;
+    if (from) filtered = filtered.filter((i) => parseTimelineDate(i.date) >= from);
+    if (to) {
+      const end = new Date(to);
+      end.setHours(23, 59, 59, 999);
+      filtered = filtered.filter((i) => parseTimelineDate(i.date) <= end);
+    }
     if (treatmentFilter) {
       filtered = filtered.filter((i) =>
         i.treatments?.some((t) => t.treatmentType === treatmentFilter)
@@ -85,7 +98,7 @@ export function PatientHistory({ patientId }: { patientId: string }) {
       });
     }
 
-    return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return filtered.sort((a, b) => parseTimelineDate(b.date).getTime() - parseTimelineDate(a.date).getTime());
   }, [assessments, sessions, typeFilter, fromDate, toDate, treatmentFilter, query]);
 
   // Resumen por tratamiento
@@ -125,7 +138,7 @@ export function PatientHistory({ patientId }: { patientId: string }) {
           <h3 className="font-serif text-lg font-bold text-ink-main dark:text-violet-50 mb-4">Tratamientos recibidos</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {Object.entries(treatmentSummary).map(([type, info]) => (
-              <div key={type} className="bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10 rounded-lg p-3">
+              <div key={type} className="bg-violet-50 dark:bg-violet-900/20 rounded-lg p-3">
                 <div className="font-medium text-ink-main dark:text-violet-50">{TREATMENT_NAMES[type] ?? type}</div>
                 <div className="text-xs text-ink-secondary dark:text-violet-200/70 mt-1">
                   {info.count} sesión{info.count !== 1 ? 'es' : ''}

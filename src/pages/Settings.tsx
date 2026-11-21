@@ -7,12 +7,15 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Select } from '@/components/ui/Select';
 import { useSettings } from '@/hooks/useSettings';
 import { useStorage } from '@/hooks/useStorage';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui/ToastContext';
 import { settingsService } from '@/services/settingsService';
 import { DEFAULT_SETTINGS } from '@/models';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Badge } from '@/components/ui/Badge';
 import { PinSettings } from '@/components/settings/PinSettings';
+import { HoursEditor } from '@/components/settings/HoursEditor';
+import { LicenseActivationModal } from '@/components/settings/LicenseActivationModal';
+import { useLicense } from '@/hooks/useLicense';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -61,8 +64,11 @@ export function Settings() {
   const { toast } = useToast();
   const { data: settings, loading } = useSettings();
   const storage = useStorage();
+  const { isLicensed, licenseKey } = useLicense();
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoRemoved, setLogoRemoved] = useState(false);
+  const [openLicenseModal, setOpenLicenseModal] = useState(false);
 
   const { register, reset, handleSubmit, setError, formState } = useForm<SettingsForm>({
     defaultValues: EMPTY_FORM,
@@ -84,6 +90,7 @@ export function Settings() {
         theme: settings.theme,
       });
       if (settings.logo) setLogoPreview(settings.logo);
+      setLogoRemoved(false);
     }
   }, [settings, reset]);
 
@@ -99,6 +106,7 @@ export function Settings() {
       return;
     }
     setLogoFile(file);
+    setLogoRemoved(false);
     const reader = new FileReader();
     reader.onload = () => setLogoPreview(reader.result as string);
     reader.readAsDataURL(file);
@@ -129,10 +137,8 @@ export function Settings() {
         printFooter: result.data.printFooter,
         followUpDays: result.data.followUpDays,
         theme: result.data.theme,
+        ...(logoFile ? { logo: logoPreview } : logoRemoved ? { logo: null } : {}),
       });
-      if (logoFile) {
-        await settingsService.setLogo(logoPreview ?? null);
-      }
       toast({
         variant: 'success',
         title: 'Configuración guardada',
@@ -146,8 +152,13 @@ export function Settings() {
         whatsapp: updated.whatsapp ?? '',
         email: updated.email ?? '',
         defaultAppointmentDuration: updated.defaultAppointmentDuration,
+        printLogo: updated.printLogo,
+        printFooter: updated.printFooter,
+        followUpDays: updated.followUpDays,
+        theme: updated.theme,
       });
       setLogoFile(null);
+      setLogoRemoved(false);
     } catch (error) {
       toast({
         variant: 'error',
@@ -214,7 +225,7 @@ export function Settings() {
             {...register('defaultAppointmentDuration')}
           />
 
-          <div className="border rounded-lg p-4 bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10 space-y-3">
+          <div className="border rounded-lg p-4 bg-violet-50 dark:bg-violet-900/20 space-y-3">
             <Badge variant="outline">Preferencias de impresión</Badge>
             <label className="flex items-center gap-2 text-sm text-ink-main dark:text-violet-50">
               <input type="checkbox" {...register('printLogo')} className="h-4 w-4 rounded border-border dark:border-violet-800/30 text-violet-600" />
@@ -244,14 +255,14 @@ export function Settings() {
             <option value="dark">Oscuro</option>
           </Select>
 
-          <div className="border rounded-lg p-4 bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10 space-y-3">
+          <div className="border rounded-lg p-4 bg-violet-50 dark:bg-violet-900/20 space-y-3">
             <Badge variant="outline">Privacidad y datos</Badge>
             <p className="text-xs text-ink-secondary dark:text-violet-200/70">
               Los datos se guardan en IndexedDB de este navegador. IndexedDB no es una base de datos cifrada ni una copia de seguridad.
               No se promete seguridad absoluta. Hacé respaldos periódicos desde la sección Respaldos.
             </p>
           </div>
-          <div className="border rounded-lg p-4 bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10">
+          <div className="border rounded-lg p-4 bg-violet-50 dark:bg-violet-900/20">
             <div className="flex items-center gap-2 mb-1">
               <Badge variant="outline">Logotipo</Badge>
               <span className="text-xs text-ink-secondary dark:text-violet-200/70">
@@ -264,6 +275,7 @@ export function Settings() {
                 <Button variant="destructive" size="sm" onClick={() => {
                   setLogoPreview(null);
                   setLogoFile(null);
+                  setLogoRemoved(true);
                 }}>
                   Quitar
                 </Button>
@@ -307,9 +319,32 @@ export function Settings() {
         </div>
       </div>
 
-      <div className="mt-8">
+      <div className="mt-8 space-y-6">
+        <HoursEditor />
+        <div className="rounded-xl border border-border bg-white dark:bg-[#251f33] dark:border-violet-800/30 p-6">
+          <h3 className="font-serif text-lg font-bold text-ink-main dark:text-violet-50 mb-4">Licencia</h3>
+          {isLicensed ? (
+            <div className="space-y-2">
+              <p className="text-sm text-success-text font-medium">Licencia activa</p>
+              <p className="text-xs text-ink-secondary dark:text-violet-200/70">
+                Código: {licenseKey}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-ink-secondary dark:text-violet-200/70">
+                Modo demo — funciones limitadas. Activá una licencia para desbloquear exportación PDF, WhatsApp y registros ilimitados.
+              </p>
+              <Button variant="primary" onClick={() => setOpenLicenseModal(true)}>
+                Activar licencia
+              </Button>
+            </div>
+          )}
+        </div>
         <PinSettings />
       </div>
+
+      <LicenseActivationModal open={openLicenseModal} onClose={() => setOpenLicenseModal(false)} />
     </div>
   );
 }

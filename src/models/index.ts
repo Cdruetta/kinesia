@@ -57,4 +57,7 @@ export const DEFAULT_SETTINGS: Omit<Settings, 'id' | 'createdAt' | 'updatedAt' |
   lastBackupDate: null,
   backupReminderDays: 7,
   theme: 'system',
+  // Licencia (freemium)
+  isLicensed: false,
+  licenseKey: null,
 };

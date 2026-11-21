@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui/ToastContext';
 import { useSettings } from '@/hooks/useSettings';
 import { settingsService } from '@/services/settingsService';
 import { pinService } from '@/services/pinService';
@@ -93,7 +93,7 @@ export function PinSettings() {
   };
 
   return (
-    <div className="border rounded-lg p-4 bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10 space-y-4">
+    <div className="border rounded-lg p-4 bg-violet-50 dark:bg-violet-900/20 space-y-4">
       <div className="flex items-center gap-2">
         <Lock className="w-5 h-5 text-violet-600" />
         <h3 className="font-serif text-lg font-bold text-ink-main dark:text-violet-50">Bloqueo local con PIN</h3>

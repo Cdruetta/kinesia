@@ -1,43 +1,14 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useState,
-  type ReactNode,
-} from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { cn } from '@/utils/cn';
 import { generateId } from '@/utils/id';
 import { AlertCircle, CheckCircle, Info } from 'lucide-react';
+import { ToastContext, type Toast } from '@/components/ui/ToastContext';
 
 const TOAST_LIMIT = 5;
 const TOAST_REMOVE_DELAY = 4000;
 
-export interface Toast {
-  id: string;
-  title?: string;
-  description?: string;
-  variant?: 'default' | 'success' | 'error';
-  duration?: number;
-}
-
 interface ToastProviderProps {
   children: ReactNode;
-}
-
-interface ToastContextValue {
-  toasts: Toast[];
-  toast: (_props: Omit<Toast, 'id'>) => string;
-  dismiss: (_id: string) => void;
-}
-
-const ToastContext = createContext<ToastContextValue | undefined>(undefined);
-
-export function useToast() {
-  const context = useContext(ToastContext);
-  if (!context) {
-    throw new Error('useToast debe usarse dentro de un ToastProvider');
-  }
-  return context;
 }
 
 export function ToastProvider({ children }: ToastProviderProps) {

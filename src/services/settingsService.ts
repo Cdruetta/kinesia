@@ -17,16 +17,23 @@ export const settingsService = {
       const existing = await db.settings.get(SETTINGS_ID);
       if (existing) return existing;
 
-      const now = new Date().toISOString();
-      const defaults: Settings = {
-        id: SETTINGS_ID,
-        ...DEFAULT_SETTINGS,
-        createdAt: now,
-        updatedAt: now,
-        archivedAt: null,
-      };
-      await db.settings.add(defaults);
-      return defaults;
+      // Si todavía no existe, la creación se serializa y vuelve a comprobar
+      // dentro de la transacción para que dos pestañas no inserten el mismo ID.
+      return await db.transaction('rw', db.settings, async () => {
+        const current = await db.settings.get(SETTINGS_ID);
+        if (current) return current;
+
+        const now = new Date().toISOString();
+        const defaults: Settings = {
+          id: SETTINGS_ID,
+          ...DEFAULT_SETTINGS,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+        };
+        await db.settings.add(defaults);
+        return defaults;
+      });
     } catch (error) {
       throw new Error(
         `No se pudo leer la configuración de la clínica: ${error instanceof Error ? error.message : String(error)}`,

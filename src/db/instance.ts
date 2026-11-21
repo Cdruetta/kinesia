@@ -1,4 +1,4 @@
-import Dexie, { type Table } from 'dexie';
+import Dexie, { type DexieOptions, type Table, type Transaction } from 'dexie';
 import {
   SCHEMA_VERSION,
   type Owner,
@@ -10,6 +10,55 @@ import {
   type MessageTemplate,
   type Settings,
 } from './schema';
+import {
+  migrateClinicalDatesToLocal,
+  migrateLegacyTable,
+  type LegacyTable,
+} from './migrations';
+
+const TABLES: LegacyTable[] = [
+  'owners',
+  'patients',
+  'appointments',
+  'assessments',
+  'sessions',
+  'communications',
+  'messageTemplates',
+  'settings',
+];
+
+function stores() {
+  return {
+    owners: 'id, &name, phone, createdAt, updatedAt, archivedAt',
+    patients: 'id, ownerId, name, species, birthDate, createdAt, updatedAt, archivedAt',
+    appointments:
+      'id, patientId, ownerId, startsAt, status, durationMinutes, createdAt, updatedAt, archivedAt',
+    assessments: 'id, patientId, title, assessedAt, createdAt, updatedAt, archivedAt',
+    sessions: 'id, patientId, assessmentId, sessionAt, createdAt, updatedAt, archivedAt',
+    communications: 'id, type, direction, contact, status, createdAt, updatedAt, archivedAt',
+    messageTemplates: 'id, name, createdAt, updatedAt, archivedAt',
+    settings: 'id, createdAt, updatedAt, archivedAt',
+  };
+}
+
+async function migrateTables(tx: Transaction): Promise<void> {
+  for (const table of TABLES) {
+    const records = await tx.table(table).toArray();
+    const migrated = migrateLegacyTable(table, records);
+    await tx.table(table).bulkPut(migrated as never[]);
+  }
+}
+
+async function migrateClinicalDates(tx: Transaction): Promise<void> {
+  for (const table of ['assessments', 'sessions'] as const) {
+    const records = await tx.table(table).toArray();
+    const migrated = migrateClinicalDatesToLocal(table, records);
+    await tx.table(table).bulkPut(migrated as never[]);
+  }
+}
+
+/** Nombre de la base de datos de producción. */
+export const DB_NAME = 'kinesia';
 
 /**
  * Instancia de Dexie. Es la única puerta de entrada a IndexedDB.
@@ -26,27 +75,29 @@ export class KinesiaDB extends Dexie {
   messageTemplates!: Table<MessageTemplate, string>;
   settings!: Table<Settings, string>;
 
-  constructor() {
-    super('kinesia');
+  constructor(name: string = DB_NAME, options?: DexieOptions) {
+    super(name, options);
 
-    this.version(SCHEMA_VERSION).stores({
-      owners: 'id, &name, phone, createdAt, updatedAt, archivedAt',
-      patients: 'id, ownerId, name, species, birthDate, createdAt, updatedAt, archivedAt',
-      appointments:
-        'id, patientId, ownerId, startsAt, status, durationMinutes, createdAt, updatedAt, archivedAt',
-      assessments: 'id, patientId, title, assessedAt, createdAt, updatedAt, archivedAt',
-      sessions: 'id, patientId, assessmentId, sessionAt, createdAt, updatedAt, archivedAt',
-      communications: 'id, type, direction, contact, status, createdAt, updatedAt, archivedAt',
-      messageTemplates: 'id, name, createdAt, updatedAt, archivedAt',
-      settings: 'id, createdAt, updatedAt, archivedAt',
-    });
+    this.version(1).stores(stores());
+
+    // La v2 incorpora los primeros campos de datos clínicos.
+    this.version(2).stores(stores()).upgrade(migrateTables);
+
+    // La v3 completa también los campos de configuración que no existían
+    // en instalaciones creadas antes de incorporar horarios y licencias.
+    this.version(3).stores(stores()).upgrade(migrateTables);
+
+    // La v4 normaliza a fecha local las fechas clínicas legacy. No cambia
+    // índices, pero necesita una versión propia para ejecutar la migración
+    // sobre bases que ya estaban en v3.
+    this.version(SCHEMA_VERSION)
+      .stores(stores())
+      .upgrade(migrateTables)
+      .upgrade(migrateClinicalDates);
   }
 }
 
 export const db = new KinesiaDB();
-
-/** Nombre de la base de datos, útil para mensajes de error y depuración. */
-export const DB_NAME = 'kinesia';
 
 /**
  * Errores de almacenamiento con mensajes comprensibles para el usuario.

@@ -13,7 +13,13 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'prompt',
-      includeAssets: ['favicon.svg'],
+      includeAssets: [
+        'favicon.svg',
+        'pwa-192x192.svg',
+        'pwa-512x512.svg',
+        'pwa-192x192.png',
+        'pwa-512x512.png',
+      ],
       manifest: {
         name: 'Kinesia - Clínica de fisioterapia veterinaria',
         short_name: 'Kinesia',
@@ -22,12 +28,17 @@ export default defineConfig({
         background_color: '#FAF9FC',
         display: 'standalone',
         orientation: 'portrait',
+        lang: 'es-AR',
+        dir: 'ltr',
+        categories: ['medical', 'productivity'],
         scope: '/',
         start_url: '/',
         icons: [
-          { src: 'pwa-192x192.svg', sizes: '192x192', type: 'image/svg+xml' },
-          { src: 'pwa-512x512.svg', sizes: '512x512', type: 'image/svg+xml' },
-          { src: 'pwa-512x512.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'any maskable' },
+          { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: 'pwa-192x192.svg', sizes: '192x192', type: 'image/svg+xml', purpose: 'any' },
+          { src: 'pwa-512x512.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'any' },
         ],
       },
       workbox: {

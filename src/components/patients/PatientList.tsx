@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Trash2, RotateCw, Eye, Edit2, PawPrint } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui/ToastContext';
 import { PatientForm } from '@/components/patients/PatientForm';
 import { useOwnersIncludingArchived } from '@/hooks/useOwners';
 import { usePatientsIncludingArchived } from '@/hooks/usePatients';
@@ -21,13 +21,18 @@ export function PatientList() {
   const { data: patients, loading: patientsLoading } = usePatientsIncludingArchived();
   const [query, setQuery] = useState('');
   const [archivedVisible, setArchivedVisible] = useState(false);
-  const [openArchive, setOpenArchive] = useState<{ id: string; name: string } | null>(null);
+  const [openArchive, setOpenArchive] = useState<{
+    id: string;
+    name: string;
+    archived: boolean;
+  } | null>(null);
   const [openForm, setOpenForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const ownerById = new Map((owners ?? []).map((o) => [o.id, o]));
 
   const filtered = (patients ?? []).filter((p) => {
+    if (archivedVisible && !p.archivedAt) return false;
     if (!archivedVisible && p.archivedAt) return false;
     if (!query) return true;
     const q = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -39,27 +44,24 @@ export function PatientList() {
     return name.includes(q) || species.includes(q) || breed.includes(q) || ownerName.includes(q);
   });
 
-  const handleArchive = useCallback(
-    async (id: string) => {
-      try {
-        if (patientArchived(id)) {
-          await patientsService.restore(id);
-          toast({ variant: 'success', title: 'Paciente restaurado' });
-        } else {
-          await patientsService.archive(id);
-          toast({ variant: 'success', title: 'Paciente archivado' });
-        }
-      } catch (error) {
-        toast({
-          variant: 'error',
-          title: 'No se pudo completar la acción',
-          description: error instanceof Error ? error.message : 'Error inesperado.',
-        });
+  const handleArchive = async (id: string) => {
+    try {
+      if (patientArchived(id)) {
+        await patientsService.restore(id);
+        toast({ variant: 'success', title: 'Paciente restaurado' });
+      } else {
+        await patientsService.archive(id);
+        toast({ variant: 'success', title: 'Paciente archivado' });
       }
-      setOpenArchive(null);
-    },
-    [toast]
-  );
+    } catch (error) {
+      toast({
+        variant: 'error',
+        title: 'No se pudo completar la acción',
+        description: error instanceof Error ? error.message : 'Error inesperado.',
+      });
+    }
+    setOpenArchive(null);
+  };
 
   const patientArchived = (id: string) => {
     const p = (patients ?? []).find((x) => x.id === id);
@@ -172,7 +174,7 @@ export function PatientList() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => setOpenArchive({ id: patient.id, name: patient.name })}
+                          onClick={() => setOpenArchive({ id: patient.id, name: patient.name, archived: Boolean(patient.archivedAt) })}
                           title={patient.archivedAt ? 'Restaurar paciente' : 'Archivar paciente'}
                         >
                           {patient.archivedAt ? <RotateCw className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
@@ -195,11 +197,11 @@ export function PatientList() {
         open={openArchive !== null}
         onConfirm={() => handleArchive(openArchive!.id)}
         onCancel={() => setOpenArchive(null)}
-        title={`¿${archivedVisible ? 'Restaurar' : 'Archivar'} a ${openArchive?.name}?`}
-        description={archivedVisible ? 'Esta acción restaurará al paciente y lo volverá a mostrar en los listados.' : 'Esta acción archivará al paciente y lo ocultará de los listados por defecto. Sus datos se conservan.'}
-        confirmLabel={archivedVisible ? 'Restaurar' : 'Archivar'}
+        title={`¿${openArchive?.archived ? 'Restaurar' : 'Archivar'} a ${openArchive?.name}?`}
+        description={openArchive?.archived ? 'Esta acción restaurará el paciente y lo volverá a mostrar en los listados.' : 'Esta acción archivará el paciente y lo ocultará de los listados por defecto. Sus datos se conservan.'}
+        confirmLabel={openArchive?.archived ? 'Restaurar' : 'Archivar'}
         cancelLabel="Cancelar"
-        destructive={!archivedVisible}
+        destructive={!openArchive?.archived}
       />
     </div>
   );

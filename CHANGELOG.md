@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.8.0] - 2026-11-20
+
+### Agregado
+- Modo freemium con límites transaccionales de 3 propietarios, 5 pacientes y 3 turnos
+- Activación local de licencia por PBKDF2 y soporte para códigos únicos por cliente
+- Generador de códigos de licencia de alta entropía y su hash
+- Iconos PNG del PWA (192/512 px) y manifiesto actualizado a español
+- Editor de horarios de atención por día
+- Registro de una sesión desde un turno de la agenda
+- Duplicación de sesiones desde la ficha del paciente
+- Consulta de versiones anteriores de evaluaciones y sesiones
+- Code-splitting de todas las rutas
+- Exportación Excel (XLSX) con nueve hojas: datos clínicos, comunicaciones, plantillas y configuración
+- Exportación CSV en ZIP, con un archivo por tabla y `LEEME.txt` para importar en Google Sheets
+- Migraciones Dexie v1 → v2 → v3 → v4 y normalización compartida con respaldos
+
+### Corregido
+- Las sesiones, evaluaciones, turnos, propietarios y pacientes editables cargan sus valores originales
+- La fecha de los formularios usa la zona horaria local
+- El logotipo se puede quitar y guardar correctamente
+- Los ajustes de impresión, seguimiento y tema no se reinician al guardar
+- Los horarios incompletos se completan y validan antes de persistir
+- Las versiones de fichas y sesiones, y la reprogramación de turnos, se guardan en transacciones atómicas
+- La importación valida tipos, relaciones, IDs y unicidad antes de restaurar
+- Los límites demo se aplican dentro de las transacciones y la restauración de un respaldo excedente se revierte sin perder datos
+- La instantánea de exportación XLSX/CSV es transaccional e incluye registros archivados y versiones clínicas anteriores
+- La exportación tabular excluye claves de licencia, hashes/sales del PIN y logotipos incrustados
+- Los CSV neutralizan textos que una hoja de cálculo podría interpretar como fórmulas
+- Una licencia manipulada en un respaldo se revalida localmente y se revoca si no es válida
+- La edad histórica del snapshot de una ficha se conserva al editarla
+- Se actualizan las dependencias de compilación para eliminar avisos de seguridad de `glob`/`minimatch`
+
+### Verificado
+- 168 pruebas aprobadas, 1 omitida
+- Build de producción con Service Worker y precaché
+- Auditoría de dependencias sin vulnerabilidades conocidas
+- Modo offline: carga, navegación, creación de registros, recursos PWA y descarga de XLSX/CSV
+- Flujos reales de edición de propietarios y pacientes, e importación de respaldo
+- Archivos XLSX y ZIP de CSV descargados desde el navegador, validados y abiertos correctamente
+
 ## [0.7.0] - 2026-11-20
 
 ### Agregado

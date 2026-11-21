@@ -8,7 +8,7 @@
  * - Las tablas se declaran aquí; la instancia y migraciones en instance.ts.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 4;
 
 type ISODate = string; // timestamp ISO 8601
 
@@ -206,6 +206,9 @@ export interface Settings {
   followUpDays: number;
   // Tema de la interfaz: light, dark, system
   theme: 'light' | 'dark' | 'system';
+  // Licencia (freemium)
+  isLicensed: boolean;
+  licenseKey: string | null; // código de licencia activado
   // Bloqueo local con PIN
   pinEnabled: boolean;
   pinHash: string | null; // hash PBKDF2

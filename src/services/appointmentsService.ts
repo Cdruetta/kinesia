@@ -1,11 +1,56 @@
 import { db } from '@/db/instance';
 import type { Appointment } from '@/models';
 import {
+  MAX_APPOINTMENT_DURATION_MINUTES,
   findOverlappingAppointment,
-  startOfDay,
-  endOfDay,
+  isValidAppointmentDuration,
 } from '@/utils/appointmentValidation';
 import { settingsService } from '@/services/settingsService';
+import {
+  assertCanCreateLimitedRecord,
+  DemoLimitExceededError,
+} from '@/services/licenseLimitsService';
+
+type AppointmentUpdate = Partial<
+  Omit<Appointment, 'id' | 'createdAt' | 'updatedAt' | 'archivedAt'>
+>;
+
+/**
+ * Datos del turno reemplazo que pueden cambiar durante una reprogramación.
+ * El estado del reemplazo siempre es `scheduled` para que deba volver a
+ * confirmarse, y los vínculos de historial los controla el servicio.
+ */
+export type AppointmentRescheduleDetails = Partial<
+  Pick<Appointment, 'patientId' | 'ownerId' | 'reason' | 'notes'>
+>;
+
+class AppointmentValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AppointmentValidationError';
+  }
+}
+
+function assertValidDuration(durationMinutes: number): void {
+  if (!isValidAppointmentDuration(durationMinutes)) {
+    throw new AppointmentValidationError(
+      `La duración del turno debe ser mayor que 0 y no puede superar ${MAX_APPOINTMENT_DURATION_MINUTES} minutos.`
+    );
+  }
+}
+
+/** Turnos activos que pueden bloquear un nuevo horario. */
+async function getActiveAppointments(): Promise<Appointment[]> {
+  const appointments = await db.appointments.toArray();
+  return appointments.filter((appointment) => !appointment.archivedAt);
+}
+
+function formatConflictTime(appointment: Appointment): string {
+  return new Date(appointment.startsAt).toLocaleTimeString('es-AR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 /**
  * Servicio de turnos.
@@ -54,58 +99,75 @@ export const appointmentsService = {
 
   async create(data: Omit<Appointment, 'id' | 'createdAt' | 'updatedAt' | 'archivedAt'>): Promise<Appointment> {
     try {
-      // Validar solapamiento
-      const dayStart = startOfDay(new Date(data.startsAt));
-      const dayEnd = endOfDay(new Date(data.startsAt));
-      const existing = await this.getAll({ startDate: dayStart, endDate: dayEnd });
-      const conflict = findOverlappingAppointment(existing, data);
-      if (conflict) {
-        throw new Error(
-          `El turno se superpone con el de ${conflict.patientId} a las ${new Date(conflict.startsAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}.`
-        );
-      }
+      // La lectura de conflictos y la escritura deben formar una única
+      // operación: otro turno no puede pasar entre ambas operaciones.
+      return await db.transaction('rw', db.appointments, db.settings, async (tx) => {
+        assertValidDuration(data.durationMinutes);
 
-      const now = new Date().toISOString();
-      const record: Appointment = {
-        ...data,
-        id: crypto.randomUUID(),
-        createdAt: now,
-        updatedAt: now,
-        archivedAt: null,
-      };
-      await db.appointments.add(record);
-      return record;
+        const existing = await getActiveAppointments();
+        const conflict = findOverlappingAppointment(existing, data);
+        if (conflict) {
+          throw new AppointmentValidationError(
+            `El turno se superpone con el de ${conflict.patientId} a las ${formatConflictTime(conflict)}.`
+          );
+        }
+
+        // La licencia y el cupo se evaluan en la misma transacción que crea
+        // el turno, junto con la validación de solapamiento.
+        await assertCanCreateLimitedRecord(tx, 'appointments');
+
+        const now = new Date().toISOString();
+        const record: Appointment = {
+          ...data,
+          id: crypto.randomUUID(),
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+        };
+        await tx.table<Appointment>('appointments').add(record);
+        return record;
+      });
     } catch (error) {
-      if (error instanceof Error && error.message.includes('se superpone')) throw error;
+      if (error instanceof AppointmentValidationError) throw error;
+      if (error instanceof DemoLimitExceededError) throw error;
       throw new Error(`No se pudo crear el turno: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   },
 
-  async update(
-    id: string,
-    patch: Partial<Omit<Appointment, 'id' | 'createdAt' | 'archivedAt'>>
-  ): Promise<Appointment> {
+  async update(id: string, patch: AppointmentUpdate): Promise<Appointment> {
     try {
-      const current = await db.appointments.get(id);
-      if (!current) throw new Error('El turno ya no existe.');
+      return await db.transaction('rw', db.appointments, async () => {
+        const current = await db.appointments.get(id);
+        if (!current) throw new Error('El turno ya no existe.');
 
-      const updatedData = { ...current, ...patch };
-      const dayStart = startOfDay(new Date(updatedData.startsAt));
-      const dayEnd = endOfDay(new Date(updatedData.startsAt));
-      const existing = await this.getAll({ startDate: dayStart, endDate: dayEnd, includeArchived: true });
-      const conflict = findOverlappingAppointment(existing, { ...updatedData, id });
-      if (conflict) {
-        throw new Error(
-          `El turno se superpone con el de ${conflict.patientId} a las ${new Date(conflict.startsAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}.`
-        );
-      }
+        const now = new Date().toISOString();
+        // Se construye un registro nuevo. `current` y `patch` nunca se
+        // mutan, y los metadatos de identidad/archivado no se pueden
+        // sobrescribir accidentalmente mediante el patch.
+        const updatedData: Appointment = {
+          ...current,
+          ...patch,
+          id: current.id,
+          createdAt: current.createdAt,
+          updatedAt: now,
+          archivedAt: current.archivedAt,
+        };
 
-      const now = new Date().toISOString();
-      const updated: Appointment = { ...updatedData, updatedAt: now };
-      await db.appointments.put(updated);
-      return updated;
+        assertValidDuration(updatedData.durationMinutes);
+
+        const existing = await getActiveAppointments();
+        const conflict = findOverlappingAppointment(existing, updatedData);
+        if (conflict) {
+          throw new AppointmentValidationError(
+            `El turno se superpone con el de ${conflict.patientId} a las ${formatConflictTime(conflict)}.`
+          );
+        }
+
+        await db.appointments.put(updatedData);
+        return updatedData;
+      });
     } catch (error) {
-      if (error instanceof Error && error.message.includes('se superpone')) throw error;
+      if (error instanceof AppointmentValidationError) throw error;
       throw new Error(`No se pudo actualizar el turno: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   },
@@ -146,55 +208,82 @@ export const appointmentsService = {
   async reschedule(
     id: string,
     newStartsAt: string,
-    newDurationMinutes?: number
+    newDurationMinutes?: number,
+    replacementDetails?: AppointmentRescheduleDetails
   ): Promise<{ original: Appointment; newAppointment: Appointment }> {
     try {
-      const original = await db.appointments.get(id);
-      if (!original) throw new Error('El turno original ya no existe.');
+      // Marcar el original y crear su reemplazo deben ser una sola operación:
+      // si el alta fallara, el turno original no puede quedar cancelado solo.
+      return await db.transaction('rw', db.appointments, db.settings, async (tx) => {
+        const original = await tx.table<Appointment>('appointments').get(id);
+        if (!original) throw new Error('El turno original ya no existe.');
 
-      // Crear nuevo turno con vínculo al original
-      const now = new Date().toISOString();
-      const newAppointment: Appointment = {
-        id: crypto.randomUUID(),
-        patientId: original.patientId,
-        ownerId: original.ownerId,
-        startsAt: newStartsAt,
-        durationMinutes: newDurationMinutes ?? original.durationMinutes,
-        status: 'scheduled',
-        reason: original.reason,
-        notes: original.notes,
-        rescheduledFrom: original.id,
-        previousStartsAt: original.startsAt,
-        createdAt: now,
-        updatedAt: now,
-        archivedAt: null,
-      };
+        const durationMinutes = newDurationMinutes ?? original.durationMinutes;
+        assertValidDuration(durationMinutes);
 
-      // Validar solapamiento del nuevo turno
-      const dayStart = startOfDay(new Date(newStartsAt));
-      const dayEnd = endOfDay(new Date(newStartsAt));
-      const existing = await this.getAll({ startDate: dayStart, endDate: dayEnd });
-      const conflict = findOverlappingAppointment(existing, newAppointment);
-      if (conflict) {
-        throw new Error(
-          `El nuevo turno se superpone con otro a las ${new Date(conflict.startsAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}.`
+        // Crear nuevo turno con vínculo al original
+        const now = new Date().toISOString();
+        const newAppointment: Appointment = {
+          id: crypto.randomUUID(),
+          patientId: replacementDetails?.patientId ?? original.patientId,
+          ownerId:
+            replacementDetails?.ownerId !== undefined
+              ? replacementDetails.ownerId
+              : original.ownerId,
+          startsAt: newStartsAt,
+          durationMinutes,
+          status: 'scheduled',
+          reason:
+            replacementDetails?.reason !== undefined
+              ? replacementDetails.reason
+              : original.reason,
+          notes:
+            replacementDetails?.notes !== undefined
+              ? replacementDetails.notes
+              : original.notes,
+          rescheduledFrom: original.id,
+          previousStartsAt: original.startsAt,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+        };
+
+        // El original se cancelará como parte de esta misma operación, por
+        // lo que no debe bloquear el reemplazo (incluso si se reprograma al
+        // mismo horario). Los demás turnos activos sí se validan.
+        const existing = await getActiveAppointments();
+        const conflict = findOverlappingAppointment(
+          existing.filter((appointment) => appointment.id !== original.id),
+          newAppointment
         );
-      }
+        if (conflict) {
+          throw new AppointmentValidationError(
+            `El nuevo turno se superpone con otro a las ${formatConflictTime(conflict)}.`
+          );
+        }
 
-      // Marcar original como cancelado
-      const updatedOriginal: Appointment = {
-        ...original,
-        status: 'cancelled',
-        notes: `${original.notes ? original.notes + ' ' : ''}Reprogramado a ${newStartsAt}.`,
-        updatedAt: now,
-      };
+        // Marcar el original como cancelado forma parte de la misma
+        // transacción que crea el reemplazo. La aserción excluye explícitamente
+        // ese ID para evaluar el conteo neto (3→3), sin cambiar la semántica
+        // de los límites: todo registro no archivado sigue contando.
+        const updatedOriginal: Appointment = {
+          ...original,
+          status: 'cancelled',
+          notes: `${original.notes ? original.notes + ' ' : ''}Reprogramado a ${newStartsAt}.`,
+          updatedAt: now,
+        };
 
-      await db.appointments.put(updatedOriginal);
-      await db.appointments.add(newAppointment);
+        await tx.table<Appointment>('appointments').put(updatedOriginal);
+        await assertCanCreateLimitedRecord(tx, 'appointments', {
+          excludeRecordId: original.id,
+        });
+        await tx.table<Appointment>('appointments').add(newAppointment);
 
-      return { original: updatedOriginal, newAppointment };
+        return { original: updatedOriginal, newAppointment };
+      });
     } catch (error) {
-      if (error instanceof Error && error.message.includes('se superpone')) throw error;
+      if (error instanceof AppointmentValidationError) throw error;
+      if (error instanceof DemoLimitExceededError) throw error;
       throw new Error(`No se pudo reprogramar el turno: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   },

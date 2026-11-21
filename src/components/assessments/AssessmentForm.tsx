@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -7,14 +7,19 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Select } from '@/components/ui/Select';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { YesNoSelector } from '@/components/ui/YesNoSelector';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui/ToastContext';
 import { useOwner } from '@/hooks/useOwner';
 import { usePatient } from '@/hooks/usePatient';
 import { assessmentsService } from '@/services/assessmentsService';
 import { computeAge } from '@/utils/age';
+import { fromLocalDateInput, toLocalDateInput } from '@/utils/dates';
+import type { Assessment } from '@/models';
 
 const assessmentSchema = z.object({
-  assessedAt: z.string().min(1, 'La fecha de evaluación es obligatoria.'),
+  assessedAt: z
+    .string()
+    .min(1, 'La fecha de evaluación es obligatoria.')
+    .refine((value) => Boolean(fromLocalDateInput(value)), 'La fecha de evaluación no es válida.'),
   // Bloque A
   ownerName: z.string().optional().or(z.literal('')),
   ownerAddress: z.string().optional().or(z.literal('')),
@@ -41,6 +46,8 @@ const assessmentSchema = z.object({
   additionalObservations: z.string().optional().or(z.literal('')),
 });
 
+type AssessmentFormValues = z.infer<typeof assessmentSchema>;
+
 interface AssessmentFormProps {
   onClose: () => void;
   patientId: string;
@@ -52,17 +59,20 @@ export function AssessmentForm({ onClose, patientId, assessmentId }: AssessmentF
   const { data: patient, loading: patientLoading } = usePatient(patientId);
   const { data: owner, loading: ownerLoading } = useOwner(patient?.ownerId);
   const [submitting, setSubmitting] = useState(false);
+  const [loadingAssessment, setLoadingAssessment] = useState(Boolean(assessmentId));
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadedAssessment, setLoadedAssessment] = useState<Assessment | null>(null);
 
   const {
     register,
     handleSubmit,
     setError,
     setValue,
-    getValues,
+    control,
     formState: { errors },
-  } = useForm({
+  } = useForm<AssessmentFormValues>({
     defaultValues: {
-      assessedAt: new Date().toISOString().split('T')[0],
+      assessedAt: toLocalDateInput(),
       ownerName: '',
       ownerAddress: '',
       ownerPhone: '',
@@ -86,40 +96,119 @@ export function AssessmentForm({ onClose, patientId, assessmentId }: AssessmentF
       additionalObservations: '',
     },
   });
+  const oncologicalValue = useWatch({ control, name: 'oncological' });
+  const ambulatoryValue = useWatch({ control, name: 'ambulatory' });
 
-  // Pre-cargar datos del propietario y paciente cuando estén disponibles
+  // Al editar, conservar los snapshots históricos de la ficha.
   useEffect(() => {
-    if (owner) {
+    if (!assessmentId) {
+      setLoadedAssessment(null);
+      setLoadError(null);
+      setLoadingAssessment(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingAssessment(true);
+    setLoadError(null);
+    setLoadedAssessment(null);
+
+    void (async () => {
+      try {
+        const assessment = await assessmentsService.getById(assessmentId);
+        if (!assessment) throw new Error('La ficha que querés abrir ya no existe.');
+        if (assessment.patientId !== patientId) {
+          throw new Error('La ficha pertenece a otro paciente.');
+        }
+        if (cancelled) return;
+
+        setValue('assessedAt', assessment.assessedAt.split('T')[0]);
+        setValue('ownerName', assessment.ownerSnapshot?.name ?? '');
+        setValue('ownerAddress', assessment.ownerSnapshot?.address ?? '');
+        setValue('ownerPhone', assessment.ownerSnapshot?.phone ?? '');
+        setValue('referredBy', assessment.referredBy ?? '');
+        setValue('patientName', assessment.patientSnapshot?.name ?? '');
+        setValue('patientSpecies', assessment.patientSnapshot?.species ?? '');
+        setValue('patientBreed', assessment.patientSnapshot?.breed ?? '');
+        setValue('patientSex', assessment.patientSnapshot?.sex ?? null);
+        setValue('oncological', assessment.patientSnapshot?.oncological ?? null);
+        setValue('orthoNeuro', assessment.patientSnapshot?.orthoNeuro ?? null);
+        setValue('orthoNeuroDetails', assessment.patientSnapshot?.orthoNeuroDetails ?? '');
+        setValue('ambulatory', assessment.patientSnapshot?.ambulatory ?? null);
+        setValue('nodules', assessment.patientSnapshot?.nodules ?? '');
+        setValue('mentalState', assessment.patientSnapshot?.mentalState ?? null);
+        setValue('preexistingDiseases', assessment.patientSnapshot?.preexistingDiseases ?? '');
+        setValue('reason', assessment.reason ?? '');
+        setValue('diagnosis', assessment.diagnosis ?? '');
+        setValue('studies', assessment.studies ?? '');
+        setValue('complements', assessment.complements ?? '');
+        setValue('medicalTreatments', assessment.medicalTreatments ?? '');
+        setValue('additionalObservations', assessment.additionalObservations ?? '');
+        if (!cancelled) setLoadedAssessment(assessment);
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : 'No se pudo cargar la ficha.');
+        }
+      } finally {
+        if (!cancelled) setLoadingAssessment(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assessmentId, patientId, setValue]);
+
+  // En una ficha nueva se completan los datos vigentes del propietario y paciente.
+  useEffect(() => {
+    if (!assessmentId && owner) {
       setValue('ownerName', owner.name);
       setValue('ownerAddress', owner.address ?? '');
       setValue('ownerPhone', owner.phone ?? '');
     }
-  }, [owner, setValue]);
+  }, [owner, assessmentId, setValue]);
 
   useEffect(() => {
-    if (patient) {
+    if (!assessmentId && patient) {
       setValue('patientName', patient.name);
       setValue('patientSpecies', patient.species);
       setValue('patientBreed', patient.breed ?? '');
       setValue('patientSex', patient.sex ?? null);
     }
-  }, [patient, setValue]);
+  }, [patient, assessmentId, setValue]);
 
-  const onSubmit = async (values: any) => {
+  const onSubmit = async (values: AssessmentFormValues) => {
     setSubmitting(true);
     try {
       const result = assessmentSchema.safeParse(values);
       if (!result.success) {
         for (const issue of result.error.issues) {
           if (issue.path[0]) {
-            setError(String(issue.path[0]) as any, { type: 'manual', message: issue.message });
+            setError(String(issue.path[0]) as keyof AssessmentFormValues, {
+              type: 'manual',
+              message: issue.message,
+            });
           }
         }
         setSubmitting(false);
         return;
       }
 
-      const age = computeAge(patient?.birthDate ?? null);
+      const currentAssessment = assessmentId ? loadedAssessment : null;
+      if (assessmentId && !currentAssessment) {
+        throw new Error('La ficha original no está cargada. Recargá el formulario.');
+      }
+
+      // En una ficha nueva la edad se calcula a la fecha de evaluación. Al
+      // editar se conserva la edad del snapshot original: no es un campo
+      // editable y recalcularlo cambiaría el histórico clínico.
+      const assessmentDate = fromLocalDateInput(values.assessedAt) ?? new Date();
+      const age = currentAssessment
+        ? {
+            years: currentAssessment.patientSnapshot?.ageYears ?? null,
+            months: currentAssessment.patientSnapshot?.ageMonths ?? null,
+          }
+        : computeAge(patient?.birthDate ?? null, assessmentDate);
 
       const ownerSnapshot = {
         name: values.ownerName || owner?.name || '',
@@ -144,7 +233,6 @@ export function AssessmentForm({ onClose, patientId, assessmentId }: AssessmentF
       };
 
       const data = {
-        patientId,
         title: `Evaluación del ${values.assessedAt}`,
         assessedAt: values.assessedAt,
         ownerSnapshot,
@@ -159,9 +247,10 @@ export function AssessmentForm({ onClose, patientId, assessmentId }: AssessmentF
       };
 
       if (assessmentId) {
-        await assessmentsService.update(assessmentId, data);
+        if (!currentAssessment) throw new Error('La ficha original no está cargada.');
+        await assessmentsService.update(assessmentId, data, currentAssessment.version);
       } else {
-        await assessmentsService.create(data);
+        await assessmentsService.create({ patientId, ...data });
       }
 
       toast({ variant: 'success', title: 'Ficha guardada' });
@@ -177,7 +266,22 @@ export function AssessmentForm({ onClose, patientId, assessmentId }: AssessmentF
     }
   };
 
-  if (patientLoading || ownerLoading) {
+  if (loadError) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-lg border border-error-text/20 bg-error-bg p-3 text-sm text-error-text" role="alert">
+          {loadError} Recargá el formulario o volvé a intentarlo desde el historial.
+        </div>
+        <div className="flex justify-end">
+          <Button variant="subtle" type="button" onClick={onClose}>
+            Cerrar
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (patientLoading || ownerLoading || loadingAssessment) {
     return (
       <div className="flex items-center justify-center min-h-[200px] text-ink-secondary dark:text-violet-200/70">
         Cargando datos…
@@ -223,12 +327,12 @@ export function AssessmentForm({ onClose, patientId, assessmentId }: AssessmentF
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <YesNoSelector
             label="Oncológico"
-            value={getValues('oncological') === true ? 'yes' : getValues('oncological') === false ? 'no' : null}
+            value={oncologicalValue === true ? 'yes' : oncologicalValue === false ? 'no' : null}
             onChange={(v) => setValue('oncological', v === 'yes')}
           />
           <YesNoSelector
             label="Ambulatorio"
-            value={getValues('ambulatory') === true ? 'yes' : getValues('ambulatory') === false ? 'no' : null}
+            value={ambulatoryValue === true ? 'yes' : ambulatoryValue === false ? 'no' : null}
             onChange={(v) => setValue('ambulatory', v === 'yes')}
           />
         </div>
@@ -276,8 +380,8 @@ export function AssessmentForm({ onClose, patientId, assessmentId }: AssessmentF
         <Button variant="subtle" type="button" onClick={onClose}>
           Cancelar
         </Button>
-        <Button type="submit" variant="primary" disabled={submitting}>
-          {submitting ? 'Guardando…' : 'Guardar evaluación'}
+        <Button type="submit" variant="primary" disabled={submitting || loadingAssessment}>
+          {loadingAssessment ? 'Cargando…' : submitting ? 'Guardando…' : 'Guardar evaluación'}
         </Button>
       </div>
     </form>

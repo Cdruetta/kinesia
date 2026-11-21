@@ -6,11 +6,12 @@ import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { useMessageTemplates } from '@/hooks/useMessageTemplates';
 import { messageTemplatesService } from '@/services/messageTemplatesService';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui/ToastContext';
 import { Plus, Edit2, RotateCw } from 'lucide-react';
 import { replaceVariables, findMissingVariables } from '@/utils/whatsapp';
+import type { MessageTemplate, MessageTemplateCategory } from '@/models';
 
-const CATEGORY_LABELS: Record<string, string> = {
+const CATEGORY_LABELS: Record<MessageTemplateCategory, string> = {
   confirmacion_turno: 'Confirmación de turno',
   recordatorio_turno: 'Recordatorio de turno',
   reprogramacion: 'Reprogramación',
@@ -35,7 +36,7 @@ export function MessageTemplatesEditor() {
   const [openEditor, setOpenEditor] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
-  const [category, setCategory] = useState('personalizado');
+  const [category, setCategory] = useState<MessageTemplateCategory>('personalizado');
   const [content, setContent] = useState('');
   const [preview, setPreview] = useState('');
 
@@ -48,7 +49,7 @@ export function MessageTemplatesEditor() {
     setOpenEditor(true);
   };
 
-  const openEdit = (t: any) => {
+  const openEdit = (t: MessageTemplate) => {
     setEditingId(t.id);
     setName(t.name);
     setCategory(t.category);
@@ -60,9 +61,9 @@ export function MessageTemplatesEditor() {
   const handleSave = async () => {
     try {
       if (editingId) {
-        await messageTemplatesService.update(editingId, { name, category: category as any, content });
+        await messageTemplatesService.update(editingId, { name, category, content });
       } else {
-        await messageTemplatesService.create({ name, category: category as any, content });
+        await messageTemplatesService.create({ name, category, content });
       }
       toast({ variant: 'success', title: 'Plantilla guardada' });
       setOpenEditor(false);
@@ -128,7 +129,11 @@ export function MessageTemplatesEditor() {
       <Modal open={openEditor} onClose={() => setOpenEditor(false)} title={editingId ? 'Editar plantilla' : 'Nueva plantilla'}>
         <div className="space-y-4">
           <Input label="Nombre" value={name} onChange={(e) => setName(e.target.value)} />
-          <Select label="Categoría" value={category} onChange={(e) => setCategory(e.target.value)}>
+          <Select
+            label="Categoría"
+            value={category}
+            onChange={(e) => setCategory(e.target.value as MessageTemplateCategory)}
+          >
             {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
               <option key={k} value={k}>{v}</option>
             ))}
@@ -139,7 +144,7 @@ export function MessageTemplatesEditor() {
             onChange={(e) => { setContent(e.target.value); setPreview(replaceVariables(e.target.value, EXAMPLE_DATA)); }}
             rows={4}
           />
-          <div className="rounded-lg border border-border dark:border-violet-800/30 bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10 p-3">
+          <div className="rounded-lg border border-border dark:border-violet-800/30 bg-violet-50 dark:bg-violet-900/20 p-3">
             <div className="text-xs text-ink-secondary dark:text-violet-200/70 uppercase tracking-wider mb-1">Vista previa (datos de ejemplo)</div>
             <p className="text-sm text-ink-main dark:text-violet-50 whitespace-pre-wrap">{preview}</p>
             {missing.length > 0 && (

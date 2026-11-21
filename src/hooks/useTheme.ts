@@ -11,7 +11,7 @@ export function useTheme() {
   // Cargar tema de settings
   useEffect(() => {
     if (settings?.theme) {
-      setThemeState(settings.theme as Theme);
+      setThemeState(settings.theme);
     }
   }, [settings?.theme]);
 
@@ -47,7 +47,7 @@ export function useTheme() {
   const setTheme = useCallback(async (newTheme: Theme) => {
     setThemeState(newTheme);
     try {
-      await settingsService.update({ theme: newTheme } as any);
+      await settingsService.update({ theme: newTheme });
     } catch {
       // silencioso
     }

@@ -2,117 +2,157 @@
 
 Gestión de turnos, propietarios, pacientes, fichas fisiátricas, sesiones, historial clínico, comunicación por WhatsApp y copias de seguridad para clínicas de fisioterapia veterinaria de pequeños animales.
 
-**100% frontend.** Despliegue como sitio estático (GitHub Pages, Netlify o similar). Los datos viven en IndexedDB del navegador mediante Dexie.js; no hay backend, ni API propia, ni almacenamiento externo, ni analítica.
+**100% frontend.** Se despliega como sitio estático. Los datos viven en IndexedDB del navegador mediante Dexie.js: no hay backend, API propia, almacenamiento externo, autenticación remota ni analítica.
 
 ## Stack
 
-- React 19 + TypeScript + Vite
-- Tailwind CSS (diseño editorial con tokens propios)
-- Lucide Icons (iconografía lineal)
-- Dexie.js sobre IndexedDB + dexie-react-hooks
-- jsPDF (+ jspdf-autotable) — para exportación de informes (módulos futuros)
-- react-router-dom, date-fns, zod, react-hook-form, clsx, tailwind-merge
-- @fontsource (Public Sans y Fraunces, fuentes autoalojadas — funciona offline, sin Google Fonts ni CDN)
-- Vitest + jsdom + Testing Library (tests)
-- vite-plugin-pwa (módulo futuro)
+- React 19 + TypeScript + Vite 8
+- Tailwind CSS 3 con tokens propios
+- Lucide Icons
+- Dexie.js sobre IndexedDB + `dexie-react-hooks`
+- jsPDF + `jspdf-autotable`
+- React Router, date-fns, Zod y React Hook Form
+- Public Sans y Fraunces autoalojadas con `@fontsource`
+- `write-excel-file` + `fflate` para exportación local XLSX/CSV
+- Vitest + jsdom + Testing Library + `fake-indexeddb`
+- `vite-plugin-pwa` con Service Worker y precaché
 
 ## Idioma y formatos
 
-Español rioplatense (Argentina). Fechas `dd/mm/aaaa`, hora de 24 h, zona horaria local.
+Español rioplatense. Fechas `dd/mm/aaaa`, hora de 24 h y zona horaria local del navegador. Los archivos de fecha usados en formularios se generan con la fecha local, sin desfase por UTC.
 
 ## Instalación y ejecución
+
+Requiere Node.js `20.19+` o `22.12+`.
 
 ```bash
 npm install
 npm run dev        # servidor de desarrollo en http://localhost:5173
-npm run build      # compila en dist/ (TypeScript + Vite)
-npm run preview    # preview del build de producción
-npm test           # corre la suite de Vitest
-npm run lint       # ESLint
+npm run build      # compila TypeScript + Vite en dist/
+npm run preview    # sirve el build de producción
+npm test           # suite de Vitest
+npm run lint       # ESLint sobre src/
 ```
 
-## Estructura de carpetas
+Utilidades administrativas:
 
+```bash
+npm run icons:generate
+npm run license:generate -- KIN-2026-ABCDEF
 ```
+
+`icons:generate` recrea los PNG del PWA. `license:generate` genera un código único y su hash PBKDF2.
+
+## Estructura
+
+```text
 src/
-  db/            Esquema Dexie, instancia y capa de acceso a IndexedDB
-  models/        Tipos de dominio y valores por defecto
-  services/      Capa de servicios por entidad (CRUD, archivado lógico, búsqueda)
-  hooks/         Hooks de React (useSettings, useStorage, …)
-  utils/         Utilidades puras con tests (fechas es-AR, edad, teléfonos WA, IDs, cn)
+  db/             Esquema Dexie, instancia y migraciones
+  models/         Tipos de dominio y valores por defecto
+  services/       CRUD, búsqueda, archivado, respaldos y licencias
+  hooks/          Suscripciones reactivas a Dexie y estado de la app
+  utils/          Funciones puras con tests
   components/
-    ui/          Componentes base accesibles (Button, Input, Modal, Table, Tabs, …)
-    layout/      Sidebar, menú móvil, barra superior, contenedor de rutas
-  pages/         Páginas por ruta (Inicio, Agenda, Propietarios, Pacientes, Comunicaciones, Respaldos, Configuración)
-  forms/         Formularios validados con zod + react-hook-form (módulos futuros)
-  export/        Exportación de informes (módulos futuros)
-  whatsapp/      Enlaces wa.me y plantillas de mensajes (módulos futuros)
-  pwa/           Configuración de vite-plugin-pwa (módulo futuro)
+    ui/           Componentes base accesibles
+    layout/       Sidebar, barra superior y navegación móvil
+    appointments/ owners/ patients/ assessments/ sessions/ whatsapp/
+    settings/     Horarios, licencia y PIN
+    pwa/          Install, update, offline y bloqueo
+  pages/          Inicio, Agenda, Propietarios, Pacientes, etc.
+  export/         Generación de PDF
 ```
 
-## Reglas de datos
+Los componentes no consultan Dexie directamente: usan servicios o hooks.
 
-- Todos los registros tienen UUID (`createdAt`, `updatedAt`, `archivedAt` nulo si activo).
-- Archivado lógico: no hay borrados físicos por defecto.
-- La app arranca vacía (sin datos ficticios). Los datos de prueba solo viven en scripts de desarrollo fuera del build.
-- `navigator.storage.persist()` se solicita al iniciar; el resultado se registra.
+## Datos y persistencia
 
-## Diseño
+- Identificadores UUID (`crypto.randomUUID()`).
+- Timestamps ISO en `createdAt` y `updatedAt`; `archivedAt` es `null` mientras el registro está activo.
+- Archivado lógico: no se borra físicamente por defecto.
+- La aplicación arranca vacía; no incluye datos ficticios.
+- `navigator.storage.persist()` se solicita al iniciar.
+- La base usa la versión de esquema 4. Las actualizaciones desde v1/v2/v3 completan campos faltantes y preservan los datos existentes.
+- La versión 4 normaliza a fecha local las fechas clínicas de instalaciones anteriores que usaban timestamps ISO.
+- La exportación JSON incluye registros archivados y versiones anteriores; la importación se restaura en una transacción atómica.
 
-- Paleta propia en `tailwind.config.ts` (violeta #7051A6, fondo #FAF9FC, textos #302A38 / #6E6479, bordes #E8E1EF, estados apagados).
-- Colores semánticos solo en badges y alertas, nunca como marca.
-- Títulos en serif (Fraunces), interfaz en sans (Public Sans), ambas autoalojadas.
-- Componentes accesibles: foco visible, etiquetas asociadas, navegación por teclado.
+## Exportación de datos
+
+La pantalla **Respaldos** ofrece tres salidas, generadas íntegramente en el dispositivo:
+
+- **Excel (XLSX)**: un libro con nueve hojas — Propietarios, Pacientes, Turnos, Evaluaciones, Sesiones, Tratamientos, Comunicaciones, Plantillas y Configuración.
+- **CSV (ZIP)**: un CSV por tabla y un `LEEME.txt`. Los CSV usan UTF-8 con BOM, coma como separador y escape RFC 4180, por lo que se abren con Excel o se importan en Google Sheets. Los textos que podrían interpretarse como fórmulas se fuerzan como texto.
+- **Respaldo restaurable (JSON)**: copia completa para guardar o recuperar dentro de Kinesia.
+
+La exportación toma una instantánea transaccional de las ocho tablas e incluye registros archivados, versiones clínicas anteriores y relaciones legibles (nombres de pacientes, propietarios, fichas y turnos). No incluye claves de licencia, hashes o sales del PIN ni logotipos incrustados. No se envía información a Excel, Google ni a ningún servidor.
+
+Google Sheets se utiliza importando uno de los CSV: no existe una integración remota ni una copia automática en la nube.
+
+## Modo demo y licencia
+
+Sin licencia, la aplicación permite hasta:
+
+- 3 propietarios
+- 5 pacientes
+- 3 turnos
+
+Los límites cuentan registros no archivados y se evalúan dentro de la misma transacción que realiza el alta, por lo que no pueden evadirse desde otra pestaña. Si un respaldo JSON supera esos límites, la restauración se rechaza de forma atómica y los datos actuales no se modifican.
+
+La exportación PDF, el envío de WhatsApp y los registros ilimitados requieren licencia. La activación es local: el código se valida en el navegador mediante PBKDF2 y el estado se guarda en IndexedDB. No hay servidor de licencias.
+
+Para entregar un código a un cliente:
+
+1. Ejecutá `npm run license:generate -- KIN-2026-ABCDEF`.
+2. Copiá el hash generado a `VALID_LICENSE_HASHES` en `src/services/licenseService.ts`.
+3. Publicá una nueva versión de la app.
+
+Se pueden incluir varios hashes, por lo que cada cliente puede recibir un código propio. Los códigos usan el formato `KIN-AAAA-XXXXXX`; los seis caracteres aleatorios evitan que un hash publicado pueda adivinarse por fuerza bruta.
+
+## PWA y modo sin conexión
+
+- Manifiesto en español con iconos PNG de 192/512 px y variantes SVG.
+- Service Worker con precaché de la aplicación y sus recursos.
+- Aviso no intrusivo cuando hay una versión nueva.
+- Indicador visible cuando el navegador pierde conexión.
+- La app y las operaciones CRUD sobre IndexedDB siguen funcionando sin red.
+
+Verificación manual realizada: la app carga sin conexión, navega a rutas internas, crea un propietario, sirve manifiesto e iconos desde el caché del Service Worker y genera las descargas XLSX y ZIP de CSV sin conexión.
+
+## Módulos implementados
+
+- **Base y diseño**: sistema visual, tema claro/oscuro/sistema, layout adaptable y navegación.
+- **Propietarios y pacientes**: CRUD, archivado, búsqueda, teléfonos duplicados y relaciones.
+- **Agenda**: vistas diaria/semanal/mensual, solapamiento, horarios, estados, cancelación y reprogramación.
+- **Fichas, sesiones e historial**: snapshots, siete tratamientos, versionado, duplicación y consulta de versiones anteriores.
+- **WhatsApp**: enlaces `wa.me`, plantillas editables, vista previa e historial manual.
+- **PDF**: datos del paciente, evaluación, sesión e historial de tratamientos.
+- **Respaldos y seguridad**: exportación local XLSX/CSV y respaldo JSON restaurable, validación de estructura y relaciones, revalidación local de licencia, PIN PBKDF2 y bloqueo local.
+- **PWA**: instalación, Service Worker, actualización, offline e iconos.
+- **Freemium**: límites demo, activación local y funciones premium.
 
 ## Checklist manual de aceptación
 
-- [ ] Alta y edición de propietarios y pacientes
+- [x] Alta y edición de propietarios y pacientes
 - [ ] Relaciones propietario-paciente consistentes
 - [ ] Turnos y validación de superposición
 - [ ] Fichas fisiátricas con bloques
-- [ ] Sesiones con tratamientos
+- [ ] Sesiones con tratamientos y registro desde un turno
 - [ ] Historial clínico con filtros
-- [ ] Exportación PDF (ficha, evaluación, sesión, historial)
+- [ ] Exportación PDF (paciente, evaluación, sesión, historial)
+- [x] Exportación local XLSX y CSV compatible con Google Sheets
 - [ ] WhatsApp con mensaje personalizado y vista previa
 - [ ] Persistencia tras cerrar el navegador
 - [ ] Exportar, borrar todo e importar
-- [ ] Modo sin conexión (abre y permite CRUD)
-- [ ] Instalación PWA (acceso directo)
+- [x] Importación de respaldo con validación y revalidación de licencia
+- [x] Modo sin conexión (abre, navega y permite CRUD)
+- [ ] Instalación PWA en un dispositivo real
 - [ ] Búsquedas y filtros
 - [ ] PIN (bloqueo y desbloqueo)
 - [ ] Adaptación a 360, 768 y 1280 px
 
 ## Conexiones externas
 
-La aplicación no realiza ninguna petición de red a terceros, salvo la apertura de `https://wa.me/<número>?text=<mensaje>` cuando el profesional envía un mensaje por WhatsApp. Las fuentes se sirven desde la propia app (sin Google Fonts ni CDN).
+La aplicación no realiza peticiones a terceros, salvo la apertura de `https://wa.me/<número>?text=<mensaje>` cuando se envía un WhatsApp. Las fuentes y todos los recursos se sirven desde la propia app.
 
-## Módulos implementados
+## Despliegue
 
-- **Módulo 1 — Base del proyecto**: Vite/React/TS/Tailwind, alias `@/`, ESLint + Vitest, sistema de diseño completo, layout con menú lateral y 7 rutas, Dexie (8 tablas, versionado, servicios, persistencia y manejo de errores), utilidades con tests (fechas es-AR, edad, normalización de teléfonos argentinos para wa.me) y página de Configuración con persistencia en IndexedDB.
-- **Módulo 2 — Propietarios y pacientes**: CRUD, archivado/restauración, búsqueda, detección de teléfono duplicado, vista del propietario con pacientes y turnos, vista del paciente con pestañas.
-- **Módulo 3 — Agenda de turnos**: vistas diaria/semanal/mensual, validación de solapamiento y horarios de atención, cambio de estado, cancelación y reprogramación.
-- **Módulo 4 — Fichas, sesiones e historial**: fichas fisiátricas con bloques, sesiones con 7 tratamientos, versionado (sin sobrescribir), historial clínico con filtros y resumen por tratamiento.
-- **Módulo 5 — WhatsApp**: enlaces wa.me, biblioteca de plantillas editables con variables, vista previa editable, historial de comunicaciones, estados Preparado/WhatsApp abierto/Marcado como enviado.
-
-## Integración futura con WhatsApp Business Platform
-
-La interfaz `MessageChannel` (definida en `src/utils/whatsapp.ts`) abstrae el envío de mensajes:
-
-```ts
-interface MessageChannel {
-  prepare(template: string, data: Record<string, string>): string;
-  open(phone: string, message: string): void;
-}
-```
-
-La única implementación actual es `ClickToChatChannel`, que abre `https://wa.me/<número>?text=<mensaje>` en una pestaña nueva.
-
-Para conectar una integración futura con **WhatsApp Business Platform** (Cloud API), se debe:
-
-1. Crear una nueva clase que implemente `MessageChannel`, por ejemplo `WhatsAppBusinessChannel`.
-2. En `prepare`, construir el payload JSON que la Cloud API espera (template name, language, components con variables).
-3. En `open`, realizar la llamada `POST` a `https://graph.facebook.com/v18.0/<PHONE_NUMBER_ID>/messages` con el token de acceso.
-4. Reemplazar la instancia de `ClickToChatChannel` por `WhatsAppBusinessChannel` en los componentes que usan `WhatsAppButton` y `MessagePreviewModal`.
-
-La autenticación (token de acceso, phone number ID) deberá almacenarse de forma segura (no en el repositorio) y los webhooks de estado de entrega/lectura deberán procesarse en un backend, lo cual está fuera del alcance de esta microapp 100% frontend.# kinesia
-# kinesia
+`vercel.json` incluye la reescritura de rutas para SPA. Un despliegue permanente requiere vincular el proyecto a una cuenta Vercel y configurar el dominio definitivo.

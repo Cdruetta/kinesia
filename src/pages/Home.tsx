@@ -1,8 +1,9 @@
 import { useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui/ToastContext';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { DemoBanner } from '@/components/ui/DemoBanner';
 import { useAppointments } from '@/hooks/useAppointments';
 import { usePatients } from '@/hooks/usePatients';
 import { useSessions } from '@/hooks/useSessions';
@@ -33,7 +34,7 @@ export function Home() {
       title: 'Bienvenido a Kinesia',
       description: 'Panel de control de la clínica.',
     });
-  }, []);
+  }, [toast]);
   const { data: settings } = useSettings();
   const { data: appointments } = useAppointments();
   const { data: patients } = usePatients({});
@@ -97,6 +98,8 @@ export function Home() {
         title="Inicio"
         subtitle="Panel de la clínica: turnos, pacientes y seguimiento."
       />
+
+      <DemoBanner />
 
       {/* Accesos rápidos */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -171,7 +174,7 @@ export function Home() {
               const owner = apt.ownerId ? ownerById.get(apt.ownerId) : undefined;
               const start = new Date(apt.startsAt);
               return (
-                <div key={apt.id} className="flex items-center gap-4 px-6 py-3 hover:bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10">
+                <div key={apt.id} className="flex items-center gap-4 px-6 py-3 hover:bg-violet-50 dark:bg-violet-900/20">
                   <div className="w-16 shrink-0 text-right">
                     <div className="text-sm font-medium text-ink-main dark:text-violet-50">{format(start, 'HH:mm', { locale: es })}</div>
                   </div>
@@ -224,7 +227,7 @@ export function Home() {
             {patientsNeedingFollowUp.slice(0, 5).map((p) => {
               const owner = p.ownerId ? ownerById.get(p.ownerId) : undefined;
               return (
-                <div key={p.id} className="flex items-center gap-4 px-6 py-3 hover:bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10">
+                <div key={p.id} className="flex items-center gap-4 px-6 py-3 hover:bg-violet-50 dark:bg-violet-900/20">
                   <PawPrint className="w-4 h-4 text-violet-600 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-ink-main dark:text-violet-50 truncate">{p.name}</p>
@@ -250,7 +253,7 @@ export function Home() {
               const owner = apt.ownerId ? ownerById.get(apt.ownerId) : undefined;
               const start = new Date(apt.startsAt);
               return (
-                <div key={apt.id} className="flex items-center gap-4 px-6 py-3 hover:bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10">
+                <div key={apt.id} className="flex items-center gap-4 px-6 py-3 hover:bg-violet-50 dark:bg-violet-900/20">
                   <div className="w-20 shrink-0 text-right">
                     <div className="text-sm font-medium text-ink-main dark:text-violet-50">{format(start, 'dd/MM', { locale: es })}</div>
                     <div className="text-xs text-ink-secondary dark:text-violet-200/70">{format(start, 'HH:mm', { locale: es })}</div>

@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { ownerDefaultValues, type OwnerFormValues } from '@/forms/ownerSchema';
 import { ownersService } from '@/services/ownersService';
 import { normalizeArgentinePhone } from '@/utils/phones';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui/ToastContext';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
@@ -30,6 +30,7 @@ export function OwnerForm({ onClose, initialOwnerId, onCreated }: OwnerFormProps
   const [duplicate, setDuplicate] = useState<{ id: string; name: string } | null>(null);
   const [skipCheck, setSkipCheck] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [loadingOwner, setLoadingOwner] = useState(Boolean(initialOwnerId));
 
   const {
     register,
@@ -42,7 +43,56 @@ export function OwnerForm({ onClose, initialOwnerId, onCreated }: OwnerFormProps
     defaultValues: ownerDefaultValues,
   });
 
+  useEffect(() => {
+    if (!initialOwnerId) {
+      reset(ownerDefaultValues);
+      setLoadingOwner(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingOwner(true);
+
+    void (async () => {
+      try {
+        const owner = await ownersService.getById(initialOwnerId);
+        if (cancelled) return;
+        if (!owner) {
+          toast({
+            variant: 'error',
+            title: 'El propietario ya no existe',
+            description: 'Cerrá el formulario y volvé a intentarlo.',
+          });
+          return;
+        }
+
+        reset({
+          name: owner.name,
+          phone: owner.phone ?? '',
+          address: owner.address ?? '',
+          notes: owner.notes ?? '',
+        });
+      } catch (error) {
+        if (!cancelled) {
+          toast({
+            variant: 'error',
+            title: 'No se pudo cargar el propietario',
+            description: error instanceof Error ? error.message : 'Error inesperado.',
+          });
+        }
+      } finally {
+        if (!cancelled) setLoadingOwner(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialOwnerId, reset, toast]);
+
   const onSubmit = async (values: OwnerFormValues) => {
+    if (loadingOwner) return;
+
     // TODO: refactorizar este flujo de duplicado, está medio enredado
     setSubmitting(true);
     try {
@@ -148,8 +198,8 @@ export function OwnerForm({ onClose, initialOwnerId, onCreated }: OwnerFormProps
           <Button variant="subtle" type="button" onClick={onClose}>
             Cancelar
           </Button>
-          <Button type="submit" variant="primary" disabled={submitting}>
-            {submitting ? 'Guardando…' : 'Guardar propietario'}
+          <Button type="submit" variant="primary" disabled={submitting || loadingOwner}>
+            {loadingOwner ? 'Cargando…' : submitting ? 'Guardando…' : 'Guardar propietario'}
           </Button>
         </div>
       </form>

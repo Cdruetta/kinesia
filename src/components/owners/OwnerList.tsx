@@ -8,32 +8,35 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { useToast } from '@/components/ui/Toast';
-import { useOwners } from '@/hooks/useOwners';
-import { usePatients } from '@/hooks/usePatients';
+import { useToast } from '@/components/ui/ToastContext';
+import { useOwnersIncludingArchived } from '@/hooks/useOwners';
+import { usePatientsIncludingArchived } from '@/hooks/usePatients';
 import { OwnerForm } from '@/components/owners/OwnerForm';
 import { ownersService } from '@/services/ownersService';
 
 export function OwnerList() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { data: owners, loading } = useOwners();
-  const { data: patients } = usePatients();
+  const { data: owners, loading } = useOwnersIncludingArchived();
+  const { data: patients } = usePatientsIncludingArchived();
   const [query, setQuery] = useState('');
   const [archivedVisible, setArchivedVisible] = useState(false);
-  const [openArchive, setOpenArchive] = useState<{ id: string; name: string } | null>(null);
+  const [openArchive, setOpenArchive] = useState<{
+    id: string;
+    name: string;
+    archived: boolean;
+  } | null>(null);
   const [openForm, setOpenForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const patientCountByOwner = new Map<string, number>();
   (patients ?? []).forEach((p) => {
-    if (!p.archivedAt) {
-      patientCountByOwner.set(p.ownerId, (patientCountByOwner.get(p.ownerId) ?? 0) + 1);
-    }
+    patientCountByOwner.set(p.ownerId, (patientCountByOwner.get(p.ownerId) ?? 0) + 1);
   });
 
   const allOwners = owners ?? [];
   const filtered = allOwners.filter((o) => {
+    if (archivedVisible && !o.archivedAt) return false;
     if (!archivedVisible && o.archivedAt) return false;
     if (!query) return true;
     const q = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -43,14 +46,19 @@ export function OwnerList() {
   });
 
   const handleArchive = useCallback(
-    async (id: string) => {
+    async (id: string, archived: boolean) => {
       try {
-        await ownersService.archive(id);
-        toast({ variant: 'success', title: 'Propietario archivado' });
+        if (archived) {
+          await ownersService.restore(id);
+          toast({ variant: 'success', title: 'Propietario restaurado' });
+        } else {
+          await ownersService.archive(id);
+          toast({ variant: 'success', title: 'Propietario archivado' });
+        }
       } catch (error) {
         toast({
           variant: 'error',
-          title: 'No se pudo archivar',
+          title: archived ? 'No se pudo restaurar' : 'No se pudo archivar',
           description: error instanceof Error ? error.message : 'Error inesperado.',
         });
       }
@@ -162,7 +170,7 @@ export function OwnerList() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => setOpenArchive({ id: owner.id, name: owner.name })}
+                          onClick={() => setOpenArchive({ id: owner.id, name: owner.name, archived: Boolean(owner.archivedAt) })}
                           title={owner.archivedAt ? 'Restaurar propietario' : 'Archivar propietario'}
                         >
                           {owner.archivedAt ? <RotateCw className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
@@ -183,13 +191,13 @@ export function OwnerList() {
 
       <ConfirmDialog
         open={openArchive !== null}
-        onConfirm={() => handleArchive(openArchive!.id)}
+        onConfirm={() => handleArchive(openArchive!.id, openArchive!.archived)}
         onCancel={() => setOpenArchive(null)}
-        title={`¿Archivar a ${openArchive?.name}?`}
-        description={archivedVisible ? 'Esta acción restaurará al propietario.' : 'Esta acción archivará al propietario y lo ocultará de los listados.'}
-        confirmLabel={archivedVisible ? 'Restaurar' : 'Archivar'}
+        title={`¿${openArchive?.archived ? 'Restaurar' : 'Archivar'} a ${openArchive?.name}?`}
+        description={openArchive?.archived ? 'Esta acción restaurará al propietario.' : 'Esta acción archivará al propietario y lo ocultará de los listados.'}
+        confirmLabel={openArchive?.archived ? 'Restaurar' : 'Archivar'}
         cancelLabel="Cancelar"
-        destructive={!archivedVisible}
+        destructive={!openArchive?.archived}
       />
     </div>
   );

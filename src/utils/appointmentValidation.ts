@@ -5,6 +5,27 @@
 
 export type TimeSlot = { start: Date; end: Date };
 
+/** Duración máxima permitida para un turno, en minutos. */
+export const MAX_APPOINTMENT_DURATION_MINUTES = 480;
+
+/**
+ * Comprueba que una duración sea utilizable para un turno.
+ * El límite máximo se aplica en el servicio para que ningún llamador pueda
+ * saltarse la validación de la interfaz.
+ */
+export function isValidAppointmentDuration(durationMinutes: number): boolean {
+  return (
+    Number.isFinite(durationMinutes) &&
+    durationMinutes > 0 &&
+    durationMinutes <= MAX_APPOINTMENT_DURATION_MINUTES
+  );
+}
+
+/** Sólo estos estados ocupan la agenda y bloquean otro turno. */
+export function isBlockingAppointmentStatus(status: string): boolean {
+  return status === 'scheduled' || status === 'confirmed';
+}
+
 export interface ClinicDayHours {
   open: string; // "HH:mm"
   close: string; // "HH:mm"
@@ -17,8 +38,9 @@ export interface ClinicHours {
 
 /** Parsea "HH:mm" a minutos desde medianoche. */
 export function parseTimeToMinutes(time: string): number {
-  const [h, m] = time.split(':').map(Number);
-  return h * 60 + m;
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time);
+  if (!match) return Number.NaN;
+  return Number(match[1]) * 60 + Number(match[2]);
 }
 
 /** Convierte minutos desde medianoche a "HH:mm". */
@@ -45,17 +67,42 @@ export function slotsOverlap(a: TimeSlot, b: TimeSlot): boolean {
 
 /**
  * Detecta conflicto de solapamiento entre un candidato y una lista de turnos.
- * Los turnos Cancelado y Ausente no bloquean.
+ * Sólo los turnos scheduled/confirmed bloquean; los archivados y los demás
+ * estados se ignoran.
  * Devuelve el turno que choca, o null si no hay conflicto.
  */
-export function findOverlappingAppointment<T extends { startsAt: string; durationMinutes: number; status: string; id?: string; patientId?: string }>(
+export function findOverlappingAppointment<T extends {
+  startsAt: string;
+  durationMinutes: number;
+  status: string;
+  id?: string;
+  patientId?: string;
+  archivedAt?: string | null;
+}>(
   turns: T[],
-  candidate: { startsAt: string; durationMinutes: number; id?: string }
+  candidate: {
+    startsAt: string;
+    durationMinutes: number;
+    id?: string;
+    status?: string;
+    archivedAt?: string | null;
+  }
 ): T | null {
+  // Un turno archivado o en un estado que no bloquea no puede generar un
+  // conflicto. Si el candidato no indica estado, se considera bloqueante
+  // para mantener el comportamiento de las validaciones existentes.
+  if (candidate.archivedAt) return null;
+  if (candidate.status !== undefined && !isBlockingAppointmentStatus(candidate.status)) {
+    return null;
+  }
+
   const candidateSlot = appointmentSlot(candidate.startsAt, candidate.durationMinutes);
   for (const t of turns) {
-    if (t.id === candidate.id) continue;
-    if (t.status === 'cancelled' || t.status === 'no-show') continue;
+    // Sólo se excluye el mismo turno cuando el candidato tiene id. Así un
+    // candidato sin id no hace que se descarten turnos sin id por accidente.
+    if (candidate.id !== undefined && t.id === candidate.id) continue;
+    if (t.archivedAt) continue;
+    if (!isBlockingAppointmentStatus(t.status)) continue;
     const slot = appointmentSlot(t.startsAt, t.durationMinutes);
     if (slotsOverlap(candidateSlot, slot)) return t;
   }
@@ -80,6 +127,7 @@ export function isWithinClinicHours(
   const endMinutes = startMinutes + durationMinutes;
   const openMinutes = parseTimeToMinutes(dayHours.open);
   const closeMinutes = parseTimeToMinutes(dayHours.close);
+  if (!Number.isFinite(openMinutes) || !Number.isFinite(closeMinutes)) return false;
 
   return startMinutes >= openMinutes && endMinutes <= closeMinutes;
 }
@@ -90,7 +138,7 @@ export function isWithinClinicHours(
  * Devuelve null si no hay espacio.
  */
 export function findNextFreeSlot(
-  turns: { startsAt: string; durationMinutes: number; status: string }[],
+  turns: { startsAt: string; durationMinutes: number; status: string; archivedAt?: string | null }[],
   date: Date,
   durationMinutes: number,
   hours: ClinicHours,
@@ -102,6 +150,7 @@ export function findNextFreeSlot(
 
   const openMinutes = parseTimeToMinutes(dayHours.open);
   const closeMinutes = parseTimeToMinutes(dayHours.close);
+  if (!Number.isFinite(openMinutes) || !Number.isFinite(closeMinutes)) return null;
 
   // Convertir date a minutos desde medianoche
   let cursor = date.getHours() * 60 + date.getMinutes();
@@ -110,7 +159,9 @@ export function findNextFreeSlot(
   // Alinear al step
   cursor = Math.ceil(cursor / stepMinutes) * stepMinutes;
 
-  const activeTurns = turns.filter((t) => t.status !== 'cancelled' && t.status !== 'no-show');
+  const activeTurns = turns.filter(
+    (t) => !t.archivedAt && isBlockingAppointmentStatus(t.status)
+  );
 
   while (cursor + durationMinutes <= closeMinutes) {
     const slotStart = new Date(date);

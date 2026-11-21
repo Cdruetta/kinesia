@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui/ToastContext';
+import { useLicense } from '@/hooks/useLicense';
+import { PremiumBadge } from '@/components/ui/PremiumBadge';
 import { MessagePreviewModal } from '@/components/whatsapp/MessagePreviewModal';
 import { normalizeArgentinePhone } from '@/utils/phones';
 
@@ -28,7 +30,12 @@ export function WhatsAppButton({
   note,
 }: WhatsAppButtonProps) {
   const { toast } = useToast();
+  const { isLicensed } = useLicense();
   const [open, setOpen] = useState(false);
+
+  if (!isLicensed) {
+    return <PremiumBadge />;
+  }
 
   const phoneResult = phone ? normalizeArgentinePhone(phone) : null;
   const isDisabled = disabled || !phone || (phoneResult ? !phoneResult.ok : true);

@@ -8,17 +8,19 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { AppointmentStatusBadge } from '@/components/appointments/AppointmentStatusBadge';
 import { AppointmentForm } from '@/components/appointments/AppointmentForm';
+import { SessionForm } from '@/components/sessions/SessionForm';
 import { useAppointments } from '@/hooks/useAppointments';
-import { usePatients } from '@/hooks/usePatients';
-import { useOwners } from '@/hooks/useOwners';
+import { usePatientsIncludingArchived } from '@/hooks/usePatients';
+import { useOwnersIncludingArchived } from '@/hooks/useOwners';
 import { useSettings } from '@/hooks/useSettings';
 import { WhatsAppButton } from '@/components/whatsapp/WhatsAppButton';
 import { appointmentsService } from '@/services/appointmentsService';
 import type { AppointmentStatus } from '@/models';
-import { useToast } from '@/components/ui/Toast';
-import { Plus, Trash2, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useToast } from '@/components/ui/ToastContext';
+import { Plus, Trash2, Calendar, ChevronLeft, ChevronRight, Edit2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { toLocalDateInput } from '@/utils/dates';
 
 type ViewMode = 'day' | 'week' | 'month';
 
@@ -32,9 +34,15 @@ export function Agenda() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [preselectedPatientId, setPreselectedPatientId] = useState<string | undefined>(undefined);
   const [openCancel, setOpenCancel] = useState<{ id: string; name: string } | null>(null);
+  const [openSessionForm, setOpenSessionForm] = useState(false);
+  const [linkedAppointmentId, setLinkedAppointmentId] = useState<string | undefined>(undefined);
+  const [sessionPatientId, setSessionPatientId] = useState<string | undefined>(undefined);
+  const [sessionInitialDate, setSessionInitialDate] = useState<string | undefined>(undefined);
 
-  const { data: patients } = usePatients();
-  const { data: owners } = useOwners();
+  // Los joins de la agenda deben resolver también registros archivados para
+  // que los turnos históricos conserven los nombres de paciente y propietario.
+  const { data: patients } = usePatientsIncludingArchived();
+  const { data: owners } = useOwnersIncludingArchived();
   const { data: settings } = useSettings();
 
   const patientById = new Map((patients ?? []).map((p) => [p.id, p]));
@@ -82,9 +90,16 @@ export function Agenda() {
 
   const navigateDate = (delta: number) => {
     const d = new Date(currentDate);
-    if (view === 'day') d.setDate(d.getDate() + delta);
-    else if (view === 'week') d.setDate(d.getDate() + delta * 7);
-    else d.setMonth(d.getMonth() + delta);
+    if (view === 'day') {
+      d.setDate(d.getDate() + delta);
+    } else if (view === 'week') {
+      d.setDate(d.getDate() + delta * 7);
+    } else {
+      // Trabajar sobre el día 1 evita que setMonth desborde (por ejemplo,
+      // 31/01 + 1 mes salte directamente de enero a marzo).
+      d.setDate(1);
+      d.setMonth(d.getMonth() + delta);
+    }
     setCurrentDate(d);
   };
 
@@ -133,7 +148,12 @@ export function Agenda() {
       {/* Controles */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         <div className="flex items-center gap-2">
-          <Button variant="subtle" size="sm" onClick={() => navigateDate(-1)}>
+          <Button
+            variant="subtle"
+            size="sm"
+            onClick={() => navigateDate(-1)}
+            aria-label={view === 'month' ? 'Mes anterior' : view === 'week' ? 'Semana anterior' : 'Día anterior'}
+          >
             <ChevronLeft className="w-4 h-4" />
           </Button>
           <span className="text-sm font-medium text-ink-main dark:text-violet-50 min-w-[140px] text-center">
@@ -141,7 +161,12 @@ export function Agenda() {
             {view === 'week' && `Semana del ${format(startDate, 'd MMM', { locale: es })}`}
             {view === 'month' && format(currentDate, 'MMMM yyyy', { locale: es })}
           </span>
-          <Button variant="subtle" size="sm" onClick={() => navigateDate(1)}>
+          <Button
+            variant="subtle"
+            size="sm"
+            onClick={() => navigateDate(1)}
+            aria-label={view === 'month' ? 'Mes siguiente' : view === 'week' ? 'Semana siguiente' : 'Día siguiente'}
+          >
             <ChevronRight className="w-4 h-4" />
           </Button>
         </div>
@@ -198,7 +223,7 @@ export function Agenda() {
                 const endTimeStr = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
 
                 return (
-                  <div key={apt.id} className="flex items-start gap-4 p-4 hover:bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10">
+                  <div key={apt.id} className="flex items-start gap-4 p-4 hover:bg-violet-50 dark:bg-violet-900/20">
                     <div className="w-20 shrink-0 text-right">
                       <div className="text-sm font-medium text-ink-main dark:text-violet-50">{timeStr}</div>
                       <div className="text-xs text-ink-secondary dark:text-violet-200/70">{endTimeStr}</div>
@@ -221,9 +246,36 @@ export function Agenda() {
                           Confirmar
                         </Button>
                       )}
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        onClick={() => {
+                          setEditingId(apt.id);
+                          setPreselectedPatientId(undefined);
+                          setOpenForm(true);
+                        }}
+                        title="Editar turno"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </Button>
                       {apt.status !== 'cancelled' && apt.status !== 'completed' && apt.status !== 'no-show' && (
                         <Button variant="destructive" size="sm" onClick={() => setOpenCancel({ id: apt.id, name: patient?.name ?? 'este turno' })} title="Cancelar">
                           <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                      {apt.status !== 'cancelled' && apt.status !== 'completed' && apt.status !== 'no-show' && (
+                        <Button
+                          variant="subtle"
+                          size="sm"
+                          onClick={() => {
+                            setLinkedAppointmentId(apt.id);
+                            setSessionPatientId(apt.patientId);
+                            setSessionInitialDate(apt.startsAt.split('T')[0]);
+                            setOpenSessionForm(true);
+                          }}
+                          title="Registrar sesión"
+                        >
+                          <Plus className="w-4 h-4" />
                         </Button>
                       )}
                       <WhatsAppButton
@@ -321,7 +373,7 @@ export function Agenda() {
                 const owner = apt.ownerId ? ownerById.get(apt.ownerId) : undefined;
                 const start = new Date(apt.startsAt);
                 return (
-                  <div key={apt.id} className="flex items-start gap-4 p-4 hover:bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10">
+                  <div key={apt.id} className="flex items-start gap-4 p-4 hover:bg-violet-50 dark:bg-violet-900/20">
                     <div className="w-24 shrink-0 text-right">
                       <div className="text-sm font-medium text-ink-main dark:text-violet-50">{format(start, 'EEE d MMM', { locale: es })}</div>
                       <div className="text-xs text-ink-secondary dark:text-violet-200/70">{format(start, 'HH:mm', { locale: es })}</div>
@@ -337,15 +389,42 @@ export function Agenda() {
                         <span>{apt.durationMinutes} min</span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0 flex-wrap">
                       {apt.status === 'scheduled' && (
                         <Button variant="subtle" size="sm" onClick={() => handleStatusChange(apt.id, 'confirmed')} title="Confirmar">
                           Confirmar
                         </Button>
                       )}
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        onClick={() => {
+                          setEditingId(apt.id);
+                          setPreselectedPatientId(undefined);
+                          setOpenForm(true);
+                        }}
+                        title="Editar turno"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </Button>
                       {apt.status !== 'cancelled' && apt.status !== 'completed' && apt.status !== 'no-show' && (
                         <Button variant="destructive" size="sm" onClick={() => setOpenCancel({ id: apt.id, name: patient?.name ?? 'este turno' })} title="Cancelar">
                           <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                      {apt.status !== 'cancelled' && apt.status !== 'completed' && apt.status !== 'no-show' && (
+                        <Button
+                          variant="subtle"
+                          size="sm"
+                          onClick={() => {
+                            setLinkedAppointmentId(apt.id);
+                            setSessionPatientId(apt.patientId);
+                            setSessionInitialDate(apt.startsAt.split('T')[0]);
+                            setOpenSessionForm(true);
+                          }}
+                          title="Registrar sesión"
+                        >
+                          <Plus className="w-4 h-4" />
                         </Button>
                       )}
                     </div>
@@ -373,7 +452,7 @@ export function Agenda() {
                 const owner = apt.ownerId ? ownerById.get(apt.ownerId) : undefined;
                 const start = new Date(apt.startsAt);
                 return (
-                  <div key={apt.id} className="flex items-start gap-4 p-4 hover:bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10">
+                  <div key={apt.id} className="flex items-start gap-4 p-4 hover:bg-violet-50 dark:bg-violet-900/20">
                     <div className="w-24 shrink-0 text-right">
                       <div className="text-sm font-medium text-ink-main dark:text-violet-50">{format(start, 'd MMM', { locale: es })}</div>
                       <div className="text-xs text-ink-secondary dark:text-violet-200/70">{format(start, 'HH:mm', { locale: es })}</div>
@@ -389,15 +468,42 @@ export function Agenda() {
                         <span>{apt.durationMinutes} min</span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0 flex-wrap">
                       {apt.status === 'scheduled' && (
                         <Button variant="subtle" size="sm" onClick={() => handleStatusChange(apt.id, 'confirmed')} title="Confirmar">
                           Confirmar
                         </Button>
                       )}
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        onClick={() => {
+                          setEditingId(apt.id);
+                          setPreselectedPatientId(undefined);
+                          setOpenForm(true);
+                        }}
+                        title="Editar turno"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </Button>
                       {apt.status !== 'cancelled' && apt.status !== 'completed' && apt.status !== 'no-show' && (
                         <Button variant="destructive" size="sm" onClick={() => setOpenCancel({ id: apt.id, name: patient?.name ?? 'este turno' })} title="Cancelar">
                           <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                      {apt.status !== 'cancelled' && apt.status !== 'completed' && apt.status !== 'no-show' && (
+                        <Button
+                          variant="subtle"
+                          size="sm"
+                          onClick={() => {
+                            setLinkedAppointmentId(apt.id);
+                            setSessionPatientId(apt.patientId);
+                            setSessionInitialDate(apt.startsAt.split('T')[0]);
+                            setOpenSessionForm(true);
+                          }}
+                          title="Registrar sesión"
+                        >
+                          <Plus className="w-4 h-4" />
                         </Button>
                       )}
                     </div>
@@ -409,10 +515,23 @@ export function Agenda() {
         </div>
       )}
 
-      <Modal open={openForm} onClose={() => setOpenForm(false)} title={editingId ? 'Editar turno' : 'Nuevo turno'}>
+      <Modal
+        open={openForm}
+        onClose={() => {
+          setOpenForm(false);
+          setEditingId(null);
+          setPreselectedPatientId(undefined);
+        }}
+        title={editingId ? 'Editar turno' : 'Nuevo turno'}
+      >
         <AppointmentForm
-          onClose={() => setOpenForm(false)}
+          onClose={() => {
+            setOpenForm(false);
+            setEditingId(null);
+            setPreselectedPatientId(undefined);
+          }}
           initialAppointmentId={editingId ?? undefined}
+          initialDate={toLocalDateInput(currentDate)}
           preselectedPatientId={preselectedPatientId}
         />
       </Modal>
@@ -427,6 +546,29 @@ export function Agenda() {
         cancelLabel="Volver"
         destructive
       />
+
+      <Modal
+        open={openSessionForm}
+        onClose={() => {
+          setOpenSessionForm(false);
+          setLinkedAppointmentId(undefined);
+          setSessionPatientId(undefined);
+          setSessionInitialDate(undefined);
+        }}
+        title="Registrar sesión"
+      >
+        <SessionForm
+          onClose={() => {
+            setOpenSessionForm(false);
+            setLinkedAppointmentId(undefined);
+            setSessionPatientId(undefined);
+            setSessionInitialDate(undefined);
+          }}
+          patientId={sessionPatientId!}
+          linkedAppointmentId={linkedAppointmentId}
+          initialDate={sessionInitialDate}
+        />
+      </Modal>
     </div>
   );
 }

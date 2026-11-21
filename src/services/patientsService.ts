@@ -1,11 +1,14 @@
 import { db } from '@/db/instance';
 import type { Patient } from '@/models';
+import {
+  assertCanCreateLimitedRecord,
+  DemoLimitExceededError,
+} from '@/services/licenseLimitsService';
 
 /**
  * Servicio de pacientes.
  * CRUD, archivado lógico y búsqueda.
  */
-
 export const patientsService = {
   async getAll({ includeArchived = false, ownerId }: { includeArchived?: boolean; ownerId?: string } = {}): Promise<Patient[]> {
     let all: Patient[];
@@ -23,35 +26,134 @@ export const patientsService = {
     } catch (error) {
       throw new Error(
         `No se pudo cargar el paciente: ${error instanceof Error ? error.message : String(error)}`
-      , { cause: error } );
+      , { cause: error });
     }
   },
 
   async create(data: Omit<Patient, 'id' | 'createdAt' | 'updatedAt' | 'archivedAt'>): Promise<Patient> {
-    const now = new Date().toISOString();
-    const record: Patient = { ...data, id: crypto.randomUUID(), createdAt: now, updatedAt: now, archivedAt: null };
-    await db.patients.add(record);
-    return record;
+    try {
+      return await db.transaction('rw', db.patients, db.owners, db.settings, async (tx) => {
+        const owner = await tx.table('owners').get(data.ownerId);
+        if (!owner) throw new Error('El propietario seleccionado ya no existe.');
+        if (owner.archivedAt) {
+          throw new Error('No se puede asignar un paciente a un propietario archivado.');
+        }
+
+        // El cupo se comprueba dentro de la transacción que crea el paciente.
+        await assertCanCreateLimitedRecord(tx, 'patients');
+
+        const now = new Date().toISOString();
+        const record: Patient = {
+          ...data,
+          id: crypto.randomUUID(),
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+        };
+        await tx.table<Patient>('patients').add(record);
+        return record;
+      });
+    } catch (error) {
+      if (error instanceof DemoLimitExceededError) throw error;
+      throw new Error(
+        `No se pudo crear el paciente: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    }
   },
 
-  async update(id: string, patch: Partial<Omit<Patient, 'id' | 'createdAt' | 'archivedAt'>>): Promise<Patient> {
-    const current = await db.patients.get(id);
-    if (!current) throw new Error('El paciente ya no existe.');
+  async update(
+    id: string,
+    patch: Partial<Omit<Patient, 'id' | 'createdAt' | 'archivedAt'>>
+  ): Promise<Patient> {
+    try {
+      return await db.transaction('rw', db.patients, db.owners, async () => {
+        const current = await db.patients.get(id);
+        if (!current) throw new Error('El paciente ya no existe.');
 
-    const now = new Date().toISOString();
-    const updated: Patient = { ...current, ...patch, updatedAt: now };
-    await db.patients.put(updated);
-    return updated;
+        const nextOwnerId = patch.ownerId ?? current.ownerId;
+        if (nextOwnerId !== current.ownerId) {
+          const owner = await db.owners.get(nextOwnerId);
+          if (!owner) throw new Error('El propietario seleccionado ya no existe.');
+          if (owner.archivedAt) {
+            throw new Error('No se puede asignar un paciente a un propietario archivado.');
+          }
+        }
+
+        const now = new Date().toISOString();
+        const updated: Patient = { ...current, ...patch, updatedAt: now };
+        await db.patients.put(updated);
+        return updated;
+      });
+    } catch (error) {
+      throw new Error(
+        `No se pudo actualizar el paciente: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    }
   },
 
   async archive(id: string): Promise<void> {
-    const now = new Date().toISOString();
-    await db.patients.update(id, { archivedAt: now, updatedAt: now });
+    try {
+      await db.transaction('rw', db.patients, db.appointments, async () => {
+        const patient = await db.patients.get(id);
+        if (!patient) throw new Error('El paciente ya no existe.');
+
+        const nowTimestamp = Date.now();
+        const activeAppointments = (await db.appointments.where('patientId').equals(id).toArray()).filter(
+          (appointment) =>
+            !appointment.archivedAt &&
+            (appointment.status === 'scheduled' || appointment.status === 'confirmed') &&
+            new Date(appointment.startsAt).getTime() >= nowTimestamp
+        );
+        if (activeAppointments.length > 0) {
+          throw new Error(
+            'No se puede archivar: el paciente tiene turnos pendientes. Cancelalos o reprogramalos primero.'
+          );
+        }
+
+        const now = new Date().toISOString();
+        await db.patients.update(id, { archivedAt: now, updatedAt: now });
+      });
+    } catch (error) {
+      throw new Error(
+        `No se pudo archivar el paciente: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    }
   },
 
   async restore(id: string): Promise<void> {
-    const now = new Date().toISOString();
-    await db.patients.update(id, { archivedAt: null, updatedAt: now });
+    try {
+      await db.transaction('rw', db.patients, db.owners, db.settings, async (tx) => {
+        const patient = await tx.table('patients').get(id);
+        if (!patient) throw new Error('El paciente ya no existe.');
+
+        const owner = await tx.table('owners').get(patient.ownerId);
+        if (!owner) throw new Error('El propietario del paciente ya no existe.');
+        if (owner.archivedAt) {
+          throw new Error('Restaurá primero el propietario del paciente.');
+        }
+
+        // Desarchivar vuelve a activar el paciente y consume un lugar del
+        // cupo, por lo que la comprobación también es transaccional.
+        if (patient.archivedAt) {
+          await assertCanCreateLimitedRecord(tx, 'patients');
+        }
+
+        const now = new Date().toISOString();
+        await tx.table('patients').update(id, {
+          archivedAt: null,
+          updatedAt: now,
+        });
+      });
+    } catch (error) {
+      if (error instanceof DemoLimitExceededError) throw error;
+      throw new Error(
+        `No se pudo restaurar el paciente: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    }
   },
 
   async search(query: string): Promise<Patient[]> {

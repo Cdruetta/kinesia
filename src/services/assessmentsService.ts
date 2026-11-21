@@ -1,10 +1,25 @@
 import { db } from '@/db/instance';
 import type { Assessment } from '@/models';
+import { fromLocalDateInput } from '@/utils/dates';
+import { getVersionChain } from '@/utils/versioning';
 
 /**
  * Servicio de fichas fisiátricas (evaluaciones).
  * CRUD con versionado: al editar se crea una versión nueva y la anterior queda consultable.
  */
+
+export type AssessmentCreateData = Omit<
+  Assessment,
+  'id' | 'createdAt' | 'updatedAt' | 'archivedAt' | 'version' | 'previousVersionId' | 'isLatest'
+>;
+
+export type AssessmentUpdateData = Omit<AssessmentCreateData, 'patientId'>;
+
+function validateAssessmentPayload(data: { assessedAt: string }): void {
+  if (!fromLocalDateInput(data.assessedAt)) {
+    throw new Error('La fecha de evaluación no es válida.');
+  }
+}
 
 export const assessmentsService = {
   async getAll({
@@ -35,48 +50,74 @@ export const assessmentsService = {
     }
   },
 
-  async create(data: Omit<Assessment, 'id' | 'createdAt' | 'updatedAt' | 'archivedAt' | 'version' | 'previousVersionId' | 'isLatest'>): Promise<Assessment> {
+  async create(data: AssessmentCreateData): Promise<Assessment> {
     try {
-      const now = new Date().toISOString();
-      const record: Assessment = {
-        ...data,
-        id: crypto.randomUUID(),
-        version: 1,
-        previousVersionId: null,
-        isLatest: true,
-        createdAt: now,
-        updatedAt: now,
-        archivedAt: null,
-      };
-      await db.assessments.add(record);
-      return record;
+      validateAssessmentPayload(data);
+
+      return await db.transaction('rw', db.assessments, db.patients, async () => {
+        const patient = await db.patients.get(data.patientId);
+        if (!patient) throw new Error('El paciente ya no existe.');
+
+        const now = new Date().toISOString();
+        const record: Assessment = {
+          ...data,
+          id: crypto.randomUUID(),
+          version: 1,
+          previousVersionId: null,
+          isLatest: true,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+        };
+        await db.assessments.add(record);
+        return record;
+      });
     } catch (error) {
       throw new Error(`No se pudo crear la ficha: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   },
 
-  async update(id: string, patch: Partial<Omit<Assessment, 'id' | 'createdAt' | 'archivedAt' | 'version' | 'previousVersionId' | 'isLatest'>>): Promise<Assessment> {
+  async update(
+    id: string,
+    patch: AssessmentUpdateData,
+    expectedVersion: number
+  ): Promise<Assessment> {
     try {
-      const current = await db.assessments.get(id);
-      if (!current) throw new Error('La ficha ya no existe.');
+      validateAssessmentPayload(patch);
 
-      // Marcar la versión anterior como no-latest
-      await db.assessments.update(id, { isLatest: false });
+      return await db.transaction('rw', db.assessments, async () => {
+        const current = await db.assessments.get(id);
+        if (!current) throw new Error('La ficha ya no existe.');
 
-      const now = new Date().toISOString();
-      const newRecord: Assessment = {
-        ...current,
-        ...patch,
-        id: crypto.randomUUID(),
-        version: current.version + 1,
-        previousVersionId: current.id,
-        isLatest: true,
-        updatedAt: now,
-        createdAt: current.createdAt,
-        archivedAt: null,
-      };
-      await db.assessments.add(newRecord);
-      return newRecord;
+        const allAssessments = await db.assessments.toArray();
+        const chain = getVersionChain(allAssessments, id);
+        const latest = chain[chain.length - 1];
+        if (!current.isLatest || latest.id !== current.id) {
+          throw new Error('Sólo se puede editar la versión actual de la ficha.');
+        }
+        if (current.version !== expectedVersion) {
+          throw new Error(
+            'La ficha cambió en otra pestaña. Recargá el formulario antes de guardar.'
+          );
+        }
+
+        const now = new Date().toISOString();
+        await db.assessments.update(id, { isLatest: false, updatedAt: now });
+
+        const newRecord: Assessment = {
+          ...current,
+          ...patch,
+          id: crypto.randomUUID(),
+          version: current.version + 1,
+          previousVersionId: current.id,
+          isLatest: true,
+          updatedAt: now,
+          createdAt: current.createdAt,
+          archivedAt: current.archivedAt,
+        };
+        await db.assessments.add(newRecord);
+        return newRecord;
+      });
     } catch (error) {
       throw new Error(`No se pudo actualizar la ficha: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
@@ -102,36 +143,10 @@ export const assessmentsService = {
 
   async getVersions(id: string): Promise<Assessment[]> {
     try {
-      const current = await db.assessments.get(id);
-      if (!current) return [];
-
-      // Encontrar el root de la cadena
-      let rootId = id;
-      let cur = current;
-      while (cur.previousVersionId) {
-        const prev = await db.assessments.get(cur.previousVersionId);
-        if (!prev) break;
-        cur = prev;
-        rootId = prev.id;
-      }
-
-      // Buscar todos los que pertenecen a la misma cadena
-      const all = await db.assessments.where('patientId').equals(current.patientId).toArray();
-      return all
-        .filter((a) => {
-          let r = a;
-          while (r.previousVersionId) {
-            const prev = all.find((x) => x.id === r.previousVersionId);
-            if (!prev) break;
-            r = prev;
-          }
-          return r.id === rootId;
-        })
-        .sort((a, b) => b.version - a.version);
+      const all = await db.assessments.toArray();
+      return getVersionChain(all, id).sort((a, b) => b.version - a.version);
     } catch (error) {
       throw new Error(`No se pudieron cargar las versiones: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   },
 };
-
-// (tipos importados desde @/models)

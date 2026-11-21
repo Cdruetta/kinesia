@@ -4,10 +4,11 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Badge } from '@/components/ui/Badge';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui/ToastContext';
 import { useStorage } from '@/hooks/useStorage';
 import { useSettings } from '@/hooks/useSettings';
-import { backupService } from '@/services/backupService';
+import { backupService, type BackupData } from '@/services/backupService';
+import { spreadsheetExportService } from '@/services/spreadsheetExportService';
 import { Download, Upload, AlertTriangle, Clock } from 'lucide-react';
 import { formatDate } from '@/utils/dates';
 
@@ -16,7 +17,8 @@ export function Backups() {
   const storage = useStorage();
   const { data: settings } = useSettings();
   const [importing, setImporting] = useState(false);
-  const [importData, setImportData] = useState<any>(null);
+  const [exporting, setExporting] = useState<'xlsx' | 'csv' | 'json' | null>(null);
+  const [importData, setImportData] = useState<BackupData | null>(null);
   const [importSummary, setImportSummary] = useState<Record<string, number> | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -29,12 +31,55 @@ export function Backups() {
     : null;
   const backupOverdue = daysSinceBackup === null || daysSinceBackup > backupReminderDays;
 
-  const handleExport = async () => {
+  const handleXlsxExport = async () => {
+    setExporting('xlsx');
+    try {
+      await spreadsheetExportService.downloadXlsx();
+      toast({
+        variant: 'success',
+        title: 'Planilla descargada',
+        description: 'El archivo XLSX incluye una hoja por tabla.',
+      });
+    } catch (error) {
+      toast({
+        variant: 'error',
+        title: 'No se pudo exportar la planilla',
+        description: error instanceof Error ? error.message : 'Error inesperado.',
+      });
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const handleCsvExport = async () => {
+    setExporting('csv');
+    try {
+      await spreadsheetExportService.downloadCsvArchive();
+      toast({
+        variant: 'success',
+        title: 'Archivos CSV descargados',
+        description: 'El ZIP incluye un CSV por tabla, listo para Excel o Google Sheets.',
+      });
+    } catch (error) {
+      toast({
+        variant: 'error',
+        title: 'No se pudieron exportar los CSV',
+        description: error instanceof Error ? error.message : 'Error inesperado.',
+      });
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const handleJsonExport = async () => {
+    setExporting('json');
     try {
       await backupService.downloadBackup();
       toast({ variant: 'success', title: 'Respaldo descargado' });
     } catch (error) {
       toast({ variant: 'error', title: 'No se pudo exportar', description: error instanceof Error ? error.message : 'Error inesperado.' });
+    } finally {
+      setExporting(null);
     }
   };
 
@@ -66,8 +111,14 @@ export function Backups() {
   const handleRestore = async () => {
     if (!importData) return;
     try {
-      await backupService.restoreAll(importData);
-      toast({ variant: 'success', title: 'Datos restaurados correctamente' });
+      const licenseRevoked = await backupService.restoreAll(importData);
+      toast({
+        variant: licenseRevoked ? 'default' : 'success',
+        title: 'Datos restaurados correctamente',
+        description: licenseRevoked
+          ? 'La licencia del respaldo no es válida para esta versión, por lo que se restauró en modo demo.'
+          : undefined,
+      });
       setImportData(null);
       setImportSummary(null);
       setShowConfirm(false);
@@ -139,14 +190,38 @@ export function Backups() {
         </div>
       </div>
 
-      {/* Exportar */}
+      {/* Exportar datos */}
       <div className="rounded-xl border border-border dark:border-violet-800/30 bg-white dark:bg-[#251f33] p-6">
-        <h3 className="font-serif text-lg font-bold text-ink-main dark:text-violet-50 mb-4">Exportar respaldo</h3>
+        <h3 className="font-serif text-lg font-bold text-ink-main dark:text-violet-50 mb-4">Exportar datos</h3>
         <p className="text-sm text-ink-secondary dark:text-violet-200/70 mb-4">
-          Descargá todos los registros en un archivo JSON. Incluye datos archivados y versiones anteriores.
+          Descargá todos los registros, incluidos los archivados y las versiones anteriores.
+          Los archivos se generan en este dispositivo; Kinesia no envía tus datos a ningún servidor.
         </p>
-        <Button onClick={handleExport}>
-          <Download className="w-4 h-4 mr-2" /> Descargar respaldo (JSON)
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button onClick={handleXlsxExport} disabled={exporting !== null}>
+            <Download className="w-4 h-4 mr-2" />
+            {exporting === 'xlsx' ? 'Generando Excel…' : 'Descargar Excel (XLSX)'}
+          </Button>
+          <Button variant="secondary" onClick={handleCsvExport} disabled={exporting !== null}>
+            <Download className="w-4 h-4 mr-2" />
+            {exporting === 'csv' ? 'Generando CSV…' : 'Descargar CSV (ZIP)'}
+          </Button>
+        </div>
+        <p className="text-xs text-ink-secondary dark:text-violet-200/70 mt-3">
+          El XLSX tiene una hoja por tabla. El ZIP contiene un CSV por tabla; podés importarlos
+          directamente en Google Sheets o abrirlos con Excel.
+        </p>
+      </div>
+
+      {/* Respaldo restaurable */}
+      <div className="rounded-xl border border-border dark:border-violet-800/30 bg-white dark:bg-[#251f33] p-6">
+        <h3 className="font-serif text-lg font-bold text-ink-main dark:text-violet-50 mb-4">Respaldo restaurable</h3>
+        <p className="text-sm text-ink-secondary dark:text-violet-200/70 mb-4">
+          Descargá una copia JSON completa para guardarla o restaurarla más adelante desde esta misma pantalla.
+        </p>
+        <Button variant="subtle" onClick={handleJsonExport} disabled={exporting !== null}>
+          <Download className="w-4 h-4 mr-2" />
+          {exporting === 'json' ? 'Generando respaldo…' : 'Descargar respaldo (JSON)'}
         </Button>
       </div>
 
@@ -174,7 +249,7 @@ export function Backups() {
         )}
 
         {importSummary && (
-          <div className="mt-4 rounded-lg border border-border dark:border-violet-800/30 bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10 p-4">
+          <div className="mt-4 rounded-lg border border-border dark:border-violet-800/30 bg-violet-50 dark:bg-violet-900/20 p-4">
             <p className="text-sm font-medium text-ink-main dark:text-violet-50 mb-2">Resumen del archivo:</p>
             <ul className="text-xs text-ink-secondary dark:text-violet-200/70 space-y-1">
               {Object.entries(importSummary).map(([table, count]) => (

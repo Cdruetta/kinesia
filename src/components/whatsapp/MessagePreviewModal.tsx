@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/Textarea';
 import { Modal } from '@/components/ui/Modal';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui/ToastContext';
 import { communicationsService } from '@/services/communicationsService';
 import { buildWaLink, findMissingVariables, replaceVariables, isOnline } from '@/utils/whatsapp';
 

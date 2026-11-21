@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_APPOINTMENT_DURATION_MINUTES,
   appointmentSlot,
   findNextFreeSlot,
   findOverlappingAppointment,
+  isBlockingAppointmentStatus,
+  isValidAppointmentDuration,
   isWithinClinicHours,
   slotsOverlap,
   toLocalISO,
@@ -79,6 +82,25 @@ describe('appointmentValidation', () => {
       expect(conflict).toBeNull();
     });
 
+    it('ignora turnos realizados', () => {
+      const completedTurns = [
+        { id: '5', startsAt: '2026-03-10T10:00:00', durationMinutes: 60, status: 'completed' },
+      ];
+      const candidate = { startsAt: '2026-03-10T10:15:00', durationMinutes: 30 };
+      const conflict = findOverlappingAppointment(completedTurns, candidate);
+      expect(conflict).toBeNull();
+    });
+
+    it('permite guardar un turno realizado que se superpone', () => {
+      const candidate = {
+        startsAt: '2026-03-10T10:15:00',
+        durationMinutes: 30,
+        status: 'completed',
+      };
+      const conflict = findOverlappingAppointment(turns, candidate);
+      expect(conflict).toBeNull();
+    });
+
     it('ignora el mismo turno (edición)', () => {
       const candidate = { id: '1', startsAt: '2026-03-10T10:15:00', durationMinutes: 30 };
       const conflict = findOverlappingAppointment(turns, candidate);
@@ -89,6 +111,94 @@ describe('appointmentValidation', () => {
       const candidate = { startsAt: '2026-03-10T09:30:00', durationMinutes: 90 };
       const conflict = findOverlappingAppointment(turns, candidate);
       expect(conflict?.id).toBe('1');
+    });
+
+    it('detecta un turno previo que invade el día candidato al cruzar medianoche', () => {
+      const previousDayTurn = [
+        {
+          id: 'previous-day',
+          startsAt: '2026-03-09T23:30:00',
+          durationMinutes: 60,
+          status: 'scheduled',
+        },
+      ];
+      const candidate = { startsAt: '2026-03-10T00:15:00', durationMinutes: 30 };
+
+      expect(findOverlappingAppointment(previousDayTurn, candidate)?.id).toBe('previous-day');
+    });
+
+    it('detecta un turno del día siguiente cuando el candidato invade medianoche', () => {
+      const nextDayTurn = [
+        {
+          id: 'next-day',
+          startsAt: '2026-03-11T00:15:00',
+          durationMinutes: 30,
+          status: 'confirmed',
+        },
+      ];
+      const candidate = { startsAt: '2026-03-10T23:45:00', durationMinutes: 60 };
+
+      expect(findOverlappingAppointment(nextDayTurn, candidate)?.id).toBe('next-day');
+    });
+
+    it('no bloquea un turno contiguo que termina exactamente a medianoche', () => {
+      const previousDayTurn = [
+        {
+          id: 'previous-day',
+          startsAt: '2026-03-09T23:30:00',
+          durationMinutes: 30,
+          status: 'scheduled',
+        },
+      ];
+      const candidate = { startsAt: '2026-03-10T00:00:00', durationMinutes: 30 };
+
+      expect(findOverlappingAppointment(previousDayTurn, candidate)).toBeNull();
+    });
+
+    it('no bloquea un turno del día siguiente si el candidato termina a medianoche', () => {
+      const nextDayTurn = [
+        {
+          id: 'next-day',
+          startsAt: '2026-03-11T00:00:00',
+          durationMinutes: 30,
+          status: 'scheduled',
+        },
+      ];
+      const candidate = { startsAt: '2026-03-10T23:30:00', durationMinutes: 30 };
+
+      expect(findOverlappingAppointment(nextDayTurn, candidate)).toBeNull();
+    });
+
+    it('ignora turnos archivados', () => {
+      const archivedTurn = [
+        {
+          id: 'archived',
+          startsAt: '2026-03-10T10:00:00',
+          durationMinutes: 60,
+          status: 'confirmed',
+          archivedAt: '2026-03-10T08:00:00',
+        },
+      ];
+      const candidate = { startsAt: '2026-03-10T10:15:00', durationMinutes: 30 };
+
+      expect(findOverlappingAppointment(archivedTurn, candidate)).toBeNull();
+    });
+  });
+
+  describe('validación de duración y estados bloqueantes', () => {
+    it('acepta una duración de hasta 480 minutos y rechaza una mayor', () => {
+      expect(MAX_APPOINTMENT_DURATION_MINUTES).toBe(480);
+      expect(isValidAppointmentDuration(480)).toBe(true);
+      expect(isValidAppointmentDuration(481)).toBe(false);
+      expect(isValidAppointmentDuration(0)).toBe(false);
+    });
+
+    it('sólo scheduled y confirmed bloquean el horario', () => {
+      expect(isBlockingAppointmentStatus('scheduled')).toBe(true);
+      expect(isBlockingAppointmentStatus('confirmed')).toBe(true);
+      expect(isBlockingAppointmentStatus('completed')).toBe(false);
+      expect(isBlockingAppointmentStatus('cancelled')).toBe(false);
+      expect(isBlockingAppointmentStatus('no-show')).toBe(false);
     });
   });
 

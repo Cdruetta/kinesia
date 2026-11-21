@@ -18,7 +18,7 @@ export function EmptyState({
   className,
 }: EmptyStateProps) {
   return (
-    <div className={cn('flex flex-col items-center justify-center gap-4 text-center p-10 rounded-xl bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10', className)}>
+    <div className={cn('flex flex-col items-center justify-center gap-4 text-center p-10 rounded-xl bg-violet-50 dark:bg-violet-900/20', className)}>
       {icon && <div className="w-12 h-12 rounded-lg bg-white dark:bg-[#251f33] border border-border dark:border-violet-800/30 flex items-center justify-center text-violet-400">{icon}</div>}
       <h3 className="font-serif text-lg font-bold text-ink-main dark:text-violet-50">{title}</h3>
       {description && <p className="text-sm text-ink-secondary dark:text-violet-200/70 max-w-xs">{description}</p>}

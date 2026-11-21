@@ -1,15 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { YesNoSelector } from '@/components/ui/YesNoSelector';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui/ToastContext';
 import { sessionsService } from '@/services/sessionsService';
-import { appointmentsService } from '@/services/appointmentsService';
-import type { TreatmentType } from '@/models';
+import type { Session, TreatmentType } from '@/models';
+import { fromLocalDateInput, toLocalDateInput } from '@/utils/dates';
 
-const TREATMENTS: { type: string; name: string; abbr: string }[] = [
+const TREATMENTS: { type: TreatmentType; name: string; abbr: string }[] = [
   { type: 'magnetoterapia', name: 'Magnetoterapia', abbr: 'Magneto' },
   { type: 'laser', name: 'Láser terapéutico', abbr: 'Láser' },
   { type: 'fotobiomodulacion', name: 'Fotobiomodulación', abbr: 'Foto' },
@@ -37,12 +37,35 @@ interface SessionFormProps {
   patientId: string;
   sessionId?: string;
   linkedAppointmentId?: string;
+  duplicateFrom?: string;
+  initialDate?: string;
 }
 
-export function SessionForm({ onClose, patientId, sessionId, linkedAppointmentId }: SessionFormProps) {
+function sessionDateToInput(value: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?$/.test(value)) {
+    return value.slice(0, 10);
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? '' : toLocalDateInput(parsed);
+}
+
+export function SessionForm({
+  onClose,
+  patientId,
+  sessionId,
+  linkedAppointmentId,
+  duplicateFrom,
+  initialDate,
+}: SessionFormProps) {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
-  const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [loadingInitialData, setLoadingInitialData] = useState(Boolean(sessionId || duplicateFrom));
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [sourceSession, setSourceSession] = useState<Session | null>(null);
+  const [sessionDate, setSessionDate] = useState(initialDate ?? toLocalDateInput());
+  const [dateError, setDateError] = useState<string | null>(null);
   const [generalObservations, setGeneralObservations] = useState('');
   const [evolution, setEvolution] = useState('');
   const [treatments, setTreatments] = useState<TreatmentState[]>(
@@ -59,6 +82,79 @@ export function SessionForm({ onClose, patientId, sessionId, linkedAppointmentId
       observations: '',
     }))
   );
+
+  // Cargar la sesión que se está editando o la sesión fuente de una duplicación.
+  useEffect(() => {
+    const sourceId = duplicateFrom ?? sessionId;
+    if (!sourceId) {
+      setSourceSession(null);
+      setLoadError(null);
+      setLoadingInitialData(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingInitialData(true);
+    setLoadError(null);
+    setSourceSession(null);
+
+    void (async () => {
+      try {
+        const original = await sessionsService.getById(sourceId);
+        if (!original) throw new Error('La sesión que querés abrir ya no existe.');
+        if (original.patientId !== patientId) {
+          throw new Error('La sesión pertenece a otro paciente.');
+        }
+
+        // Al duplicar conservamos el contenido, pero la nueva sesión queda para hoy.
+        if (sessionId) setSessionDate(sessionDateToInput(original.sessionAt));
+        setGeneralObservations(original.generalObservations ?? '');
+        setEvolution(original.evolution ?? '');
+        setTreatments(
+          TREATMENTS.map((t) => {
+            const existing = (original.treatments ?? []).find((x) => x.treatmentType === t.type);
+            if (!existing) {
+              return {
+                type: t.type,
+                applied: false,
+                zone: '',
+                intensity: '',
+                intensityUnit: '',
+                timeMinutes: '',
+                dose: '',
+                frequency: '',
+                params: [],
+                observations: '',
+              };
+            }
+            return {
+              type: t.type,
+              applied: existing.applied,
+              zone: existing.zone ?? '',
+              intensity: existing.intensity ?? '',
+              intensityUnit: existing.intensityUnit ?? '',
+              timeMinutes: existing.timeMinutes?.toString() ?? '',
+              dose: existing.dose ?? '',
+              frequency: existing.frequency ?? '',
+              params: existing.additionalParams ?? [],
+              observations: existing.observations ?? '',
+            };
+          })
+        );
+        if (!cancelled) setSourceSession(original);
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : 'No se pudo cargar la sesión.');
+        }
+      } finally {
+        if (!cancelled) setLoadingInitialData(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [duplicateFrom, patientId, sessionId]);
 
   const updateTreatment = (index: number, patch: Partial<TreatmentState>) => {
     setTreatments((prev) => prev.map((t, i) => (i === index ? { ...t, ...patch } : t)));
@@ -90,7 +186,16 @@ export function SessionForm({ onClose, patientId, sessionId, linkedAppointmentId
     );
   };
 
-  const onSubmit = async () => {
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submitting || loadingInitialData || loadError) return;
+
+    setDateError(null);
+    if (!fromLocalDateInput(sessionDate)) {
+      setDateError('La fecha de sesión no es válida.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const treatmentApplications = treatments
@@ -108,10 +213,7 @@ export function SessionForm({ onClose, patientId, sessionId, linkedAppointmentId
           observations: t.observations || null,
         }));
 
-      const data = {
-        patientId,
-        assessmentId: null,
-        linkedAppointmentId: linkedAppointmentId ?? null,
+      const payload = {
         sessionAt: `${sessionDate}T00:00:00`,
         generalObservations: generalObservations || null,
         evolution: evolution || null,
@@ -119,14 +221,27 @@ export function SessionForm({ onClose, patientId, sessionId, linkedAppointmentId
       };
 
       if (sessionId) {
-        await sessionsService.update(sessionId, data);
+        if (!sourceSession) throw new Error('La sesión original no está cargada.');
+        await sessionsService.update(sessionId, payload, sourceSession.version);
+      } else if (duplicateFrom) {
+        if (!sourceSession) throw new Error('La sesión fuente no está cargada.');
+        await sessionsService.create({
+          patientId,
+          assessmentId: sourceSession.assessmentId,
+          ...payload,
+        });
+      } else if (linkedAppointmentId) {
+        await sessionsService.createFromAppointment(linkedAppointmentId, {
+          patientId,
+          assessmentId: null,
+          ...payload,
+        });
       } else {
-        await sessionsService.create(data);
-      }
-
-      // Si viene de un turno, marcarlo como Realizado
-      if (linkedAppointmentId) {
-        await appointmentsService.changeStatus(linkedAppointmentId, 'completed');
+        await sessionsService.create({
+          patientId,
+          assessmentId: null,
+          ...payload,
+        });
       }
 
       toast({ variant: 'success', title: 'Sesión guardada' });
@@ -142,13 +257,31 @@ export function SessionForm({ onClose, patientId, sessionId, linkedAppointmentId
     }
   };
 
+  if (loadingInitialData) {
+    return (
+      <div className="flex items-center justify-center min-h-[200px] text-ink-secondary dark:text-violet-200/70">
+        Cargando sesión…
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <form onSubmit={onSubmit} className="space-y-6">
+      {loadError && (
+        <div className="rounded-lg border border-error-text/20 bg-error-bg p-3 text-sm text-error-text" role="alert">
+          {loadError} Recargá el formulario o volvé a intentarlo desde el historial.
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <DatePicker
           label="Fecha de sesión *"
           value={sessionDate}
-          onChange={(e) => setSessionDate(e.target.value)}
+          onChange={(e) => {
+            setSessionDate(e.target.value);
+            setDateError(null);
+          }}
+          error={dateError ?? undefined}
           required
         />
       </div>
@@ -213,6 +346,7 @@ export function SessionForm({ onClose, patientId, sessionId, linkedAppointmentId
                     <Input
                       label="Tiempo (min)"
                       type="number"
+                      min={0}
                       value={t.timeMinutes}
                       onChange={(e) => updateTreatment(index, { timeMinutes: e.target.value })}
                       placeholder="Ej. 15"
@@ -233,7 +367,6 @@ export function SessionForm({ onClose, patientId, sessionId, linkedAppointmentId
                     />
                   </div>
 
-                  {/* Parámetros adicionales */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <label className="text-sm font-medium text-ink-main dark:text-violet-50">Parámetros adicionales</label>
@@ -278,10 +411,14 @@ export function SessionForm({ onClose, patientId, sessionId, linkedAppointmentId
         <Button variant="subtle" type="button" onClick={onClose}>
           Cancelar
         </Button>
-        <Button type="submit" variant="primary" disabled={submitting} onClick={onSubmit}>
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={submitting || Boolean(loadError) || !sessionDate}
+        >
           {submitting ? 'Guardando…' : 'Guardar sesión'}
         </Button>
       </div>
-    </div>
+    </form>
   );
 }

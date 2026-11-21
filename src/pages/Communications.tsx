@@ -55,7 +55,7 @@ export function Communications() {
         subtitle="Historial de mensajes por WhatsApp enviados a propietarios."
       />
 
-      <div className="rounded-lg border border-border dark:border-violet-800/30 bg-violet-50 dark:bg-violet-900/20/50 dark:bg-violet-900/10 p-3 text-xs text-ink-secondary dark:text-violet-200/70">
+      <div className="rounded-lg border border-border dark:border-violet-800/30 bg-violet-50 dark:bg-violet-900/20 p-3 text-xs text-ink-secondary dark:text-violet-200/70">
         La aplicación registra que se abrió WhatsApp con el mensaje preparado; no puede saber si se envió.
       </div>
 
