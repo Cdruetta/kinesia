@@ -14,6 +14,7 @@ vi.mock('@/services/settingsService', () => ({
   settingsService: {
     get: vi.fn(),
     update: vi.fn(),
+    updateLicenseState: vi.fn(),
   },
 }));
 
@@ -47,6 +48,14 @@ describe('useLicense', () => {
       currentSettings = { ...currentSettings, ...patch };
       return currentSettings;
     });
+    vi.mocked(settingsService.updateLicenseState).mockImplementation(
+      async (expectedKey, state) => {
+        const currentKey = currentSettings.licenseKey ?? null;
+        if (currentKey !== expectedKey) return null;
+        currentSettings = { ...currentSettings, ...state };
+        return currentSettings;
+      }
+    );
   });
 
   it('activa una licencia válida y persiste el código normalizado', async () => {
@@ -85,7 +94,7 @@ describe('useLicense', () => {
     await waitFor(() => {
       expect(result.current.isLicensed).toBe(true);
     });
-    expect(settingsService.update).toHaveBeenCalledWith({
+    expect(settingsService.updateLicenseState).toHaveBeenCalledWith(TEST_CODE, {
       isLicensed: true,
       licenseKey: TEST_CODE,
     });
@@ -104,10 +113,13 @@ describe('useLicense', () => {
     const { result } = renderHook(() => useLicense(createLicenseService([])));
 
     await waitFor(() => {
-      expect(settingsService.update).toHaveBeenCalledWith({
-        isLicensed: false,
-        licenseKey: null,
-      });
+      expect(settingsService.updateLicenseState).toHaveBeenCalledWith(
+        'KIN-2099-Z9C42M',
+        {
+          isLicensed: false,
+          licenseKey: null,
+        }
+      );
     });
     expect(result.current.isLicensed).toBe(false);
     expect(result.current.licenseKey).toBeNull();

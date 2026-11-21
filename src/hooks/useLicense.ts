@@ -47,7 +47,7 @@ export function useLicense(validator: LicenseValidator = licenseService) {
 
       if (persistedLicenseFlag || persistedLicenseKey !== null) {
         void settingsService
-          .update({ isLicensed: false, licenseKey: null })
+          .updateLicenseState(null, { isLicensed: false, licenseKey: null })
           .catch(() => {
             // La UI sigue en modo demo aunque no se pueda persistir la revocación.
           });
@@ -62,34 +62,34 @@ export function useLicense(validator: LicenseValidator = licenseService) {
         const valid = await validator.validateLicense(normalizedKey);
         if (cancelled) return;
 
-        // Relee settings para no revocar una licencia que se activó mientras
-        // esta validación estaba en curso.
-        const current = await settingsService.get();
-        if (cancelled) return;
-
-        const currentKey = current.licenseKey
-          ? normalizeLicenseCode(current.licenseKey)
-          : null;
-        if (currentKey !== normalizedKey) {
-          setIsLicensed(false);
-          setLicenseKey(null);
-          return;
-        }
-
         if (valid) {
+          // La actualización condicional evita restaurar una licencia que otra
+          // pestaña desactivó mientras se validaba el hash.
+          const updated = await settingsService.updateLicenseState(normalizedKey, {
+            isLicensed: true,
+            licenseKey: normalizedKey,
+          });
+          if (cancelled) return;
+
+          if (!updated) {
+            setIsLicensed(false);
+            setLicenseKey(null);
+            return;
+          }
+
           setIsLicensed(true);
           setLicenseKey(normalizedKey);
-
-          if (!current.isLicensed || current.licenseKey !== normalizedKey) {
-            await settingsService.update({
-              isLicensed: true,
-              licenseKey: normalizedKey,
-            });
-          }
         } else {
+          // Sólo se revoca la clave que se validó. Si otra pestaña activó una
+          // distinta durante la validación, esa licencia no se sobrescribe.
+          await settingsService.updateLicenseState(normalizedKey, {
+            isLicensed: false,
+            licenseKey: null,
+          });
+          if (cancelled) return;
+
           setIsLicensed(false);
           setLicenseKey(null);
-          await settingsService.update({ isLicensed: false, licenseKey: null });
         }
       } catch {
         if (cancelled) return;
@@ -100,15 +100,12 @@ export function useLicense(validator: LicenseValidator = licenseService) {
         setLicenseKey(null);
 
         try {
-          const current = await settingsService.get();
-          const currentKey = current.licenseKey
-            ? normalizeLicenseCode(current.licenseKey)
-            : null;
-          if (currentKey === normalizedKey) {
-            await settingsService.update({ isLicensed: false, licenseKey: null });
-          }
+          await settingsService.updateLicenseState(normalizedKey, {
+            isLicensed: false,
+            licenseKey: null,
+          });
         } catch {
-          // Si tampoco se puede leer settings, se mantiene el modo demo.
+          // Si tampoco se puede actualizar settings, se mantiene el modo demo.
         }
       } finally {
         if (!cancelled) setIsValidating(false);

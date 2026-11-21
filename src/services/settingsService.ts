@@ -1,6 +1,7 @@
 import { db } from '@/db/instance';
 import type { Settings } from '@/models';
 import { DEFAULT_SETTINGS } from '@/models';
+import { normalizeLicenseCode } from '@/services/licenseService';
 
 const SETTINGS_ID = 'settings';
 
@@ -45,18 +46,80 @@ export const settingsService = {
   /** Actualiza campos parciales de la configuración. */
   async update(patch: Partial<Omit<Settings, 'id' | 'createdAt' | 'archivedAt'>>): Promise<Settings> {
     try {
-      const current = await this.get();
-      const now = new Date().toISOString();
-      const updated: Settings = {
-        ...current,
-        ...patch,
-        updatedAt: now,
-      };
-      await db.settings.put(updated);
-      return updated;
+      // La lectura y la escritura deben compartir una transacción rw. Si dos
+      // pestañas cambian campos distintos, la segunda lectura ve el cambio de
+      // la primera y conserva ambos valores.
+      return await db.transaction('rw', db.settings, async (tx) => {
+        const current = await tx.table<Settings>('settings').get(SETTINGS_ID);
+        const now = new Date().toISOString();
+        const base: Settings = current ?? {
+          id: SETTINGS_ID,
+          ...DEFAULT_SETTINGS,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+        };
+        const updated: Settings = {
+          ...base,
+          ...patch,
+          id: SETTINGS_ID,
+          createdAt: base.createdAt,
+          updatedAt: now,
+          archivedAt: base.archivedAt,
+        };
+        await tx.table<Settings>('settings').put(updated);
+        return updated;
+      });
     } catch (error) {
       throw new Error(
         `No se pudo guardar la configuración de la clínica: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    }
+  },
+
+  /**
+   * Actualiza el estado de licencia sólo si la clave persistida sigue siendo
+   * la esperada. Devuelve `null` si otra pestaña cambió la clave entretanto.
+   */
+  async updateLicenseState(
+    expectedLicenseKey: string | null,
+    state: { isLicensed: boolean; licenseKey: string | null }
+  ): Promise<Settings | null> {
+    try {
+      return await db.transaction('rw', db.settings, async (tx) => {
+        const current = await tx.table<Settings>('settings').get(SETTINGS_ID);
+        const currentKey = current?.licenseKey
+          ? normalizeLicenseCode(current.licenseKey) || null
+          : null;
+        const expectedKey = expectedLicenseKey
+          ? normalizeLicenseCode(expectedLicenseKey) || null
+          : null;
+
+        if (currentKey !== expectedKey) return null;
+
+        const now = new Date().toISOString();
+        const base: Settings = current ?? {
+          id: SETTINGS_ID,
+          ...DEFAULT_SETTINGS,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+        };
+        const updated: Settings = {
+          ...base,
+          isLicensed: state.isLicensed,
+          licenseKey: state.licenseKey
+            ? normalizeLicenseCode(state.licenseKey) || null
+            : null,
+          updatedAt: now,
+        };
+        await tx.table<Settings>('settings').put(updated);
+        return updated;
+      });
+    } catch (error) {
+      throw new Error(
+        `No se pudo guardar el estado de la licencia: ${error instanceof Error ? error.message : String(error)}`,
         { cause: error }
       );
     }

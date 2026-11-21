@@ -12,11 +12,13 @@ const LICENSE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 /**
  * Hashes habilitados en esta versión.
  *
- * La lista se entrega vacía: no existe un código universal. Para publicar una
- * licencia comercial hay que generar un código único, agregar solamente su
- * hash y publicar una nueva versión de la app.
+ * Cada código comercial es único y se genera fuera del repositorio. Sólo se
+ * publica su hash; para agregar clientes se incorpora un nuevo hash y se
+ * publica una nueva versión de la app.
  */
-const VALID_LICENSE_HASHES: readonly string[] = [];
+export const VALID_LICENSE_HASHES: readonly string[] = [
+  '7Q2qZkdXK+BJUEHR8zBiRd1kCs+crAcQXjMnNV4ZM/I=',
+];
 
 export interface LicenseService {
   isValidFormat(code: string): boolean;

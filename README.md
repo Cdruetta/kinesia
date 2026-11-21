@@ -83,7 +83,7 @@ La pantalla **Respaldos** ofrece tres salidas, generadas íntegramente en el dis
 - **CSV (ZIP)**: un CSV por tabla y un `LEEME.txt`. Los CSV usan UTF-8 con BOM, coma como separador y escape RFC 4180, por lo que se abren con Excel o se importan en Google Sheets. Los textos que podrían interpretarse como fórmulas se fuerzan como texto.
 - **Respaldo restaurable (JSON)**: copia completa para guardar o recuperar dentro de Kinesia.
 
-La exportación toma una instantánea transaccional de las ocho tablas e incluye registros archivados, versiones clínicas anteriores y relaciones legibles (nombres de pacientes, propietarios, fichas y turnos). No incluye claves de licencia, hashes o sales del PIN ni logotipos incrustados. No se envía información a Excel, Google ni a ningún servidor.
+La exportación toma una instantánea transaccional de las ocho tablas e incluye registros archivados, versiones clínicas anteriores y relaciones legibles (nombres de pacientes, propietarios, fichas y turnos). Las salidas XLSX y CSV no incluyen claves de licencia, hashes o sales del PIN ni logotipos incrustados. El JSON restaurable sí conserva esa configuración sensible para poder restaurar la clínica sin pérdida: tratalo como una copia privada, no lo compartas ni lo subas a servicios externos. No se envía información a Excel, Google ni a ningún servidor.
 
 Google Sheets se utiliza importando uno de los CSV: no existe una integración remota ni una copia automática en la nube.
 
@@ -99,7 +99,7 @@ Los límites cuentan registros no archivados y se evalúan dentro de la misma tr
 
 La exportación PDF, el envío de WhatsApp y los registros ilimitados requieren licencia. La activación es local: el código se valida en el navegador mediante PBKDF2 y el estado se guarda en IndexedDB. No hay servidor de licencias.
 
-Para entregar un código a un cliente:
+La versión 0.8.0 ya incluye el hash de una licencia inicial de alta entropía. Para entregar un código nuevo o adicional a un cliente:
 
 1. Ejecutá `npm run license:generate -- KIN-2026-ABCDEF`.
 2. Copiá el hash generado a `VALID_LICENSE_HASHES` en `src/services/licenseService.ts`.

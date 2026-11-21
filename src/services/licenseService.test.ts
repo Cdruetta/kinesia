@@ -3,11 +3,17 @@ import {
   createLicenseService,
   licenseService,
   normalizeLicenseCode,
+  VALID_LICENSE_HASHES,
 } from '@/services/licenseService';
 
 const FORMAT_CODE = 'KIN-2099-X7Q42M';
 
 describe('licenseService', () => {
+  it('publica al menos un hash comercial en la versión distribuida', () => {
+    expect(VALID_LICENSE_HASHES.length).toBeGreaterThan(0);
+    expect(new Set(VALID_LICENSE_HASHES).size).toBe(VALID_LICENSE_HASHES.length);
+  });
+
   it('acepta el formato KIN-AAAA-XXXXXX', () => {
     expect(licenseService.isValidFormat(FORMAT_CODE)).toBe(true);
     expect(licenseService.isValidFormat(' kin-2099-x7q42m ')).toBe(true);

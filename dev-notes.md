@@ -18,7 +18,9 @@
 - **Exportación tabular local**: XLSX y ZIP de CSV se generan en el navegador. Google Sheets se integra importando los CSV; no se envían datos a terceros.
 - **Formato CSV interoperable**: UTF-8 con BOM, separador coma, saltos CRLF y escape RFC 4180 para conservar acentos, comas, comillas y saltos de línea. Los textos que empiezan como fórmula se anteponen con apóstrofo para evitar ejecución al importarlos.
 - **Instantánea consistente**: XLSX, CSV y JSON parten de una lectura transaccional de las ocho tablas para no mezclar estados de una base que otra pestaña esté modificando.
-- **Límites demo transaccionales**: el código de licencia se valida con `Dexie.waitFor` y el cupo se cuenta en la misma escritura, contando registros no archivados. Una reprogramación excluye el original para evaluar el delta neto. Un respaldo que excede el modo demo se rechaza sin modificar la base actual.
+- **Límites demo transaccionales**: el código de licencia se valida con `Dexie.waitFor` y el cupo se cuenta en la misma escritura, contando registros no archivados. Al reprogramar, el turno original se cancela y se archiva lógicamente en la misma transacción, de modo que el reemplazo conserva el cupo sin incrementarlo. Un respaldo que excede el modo demo se rechaza sin modificar la base actual.
+- **PIN persistente y serializable**: los intentos fallidos y el bloqueo temporal se guardan en `settings`; cada verificación se registra dentro de una transacción rw para que dos pestañas no puedan reutilizar el mismo intento. El bloqueo persistido se rehidrata al recargar y el formulario vuelve a habilitarse al vencer la espera.
+- **Consistencia de configuración y relaciones**: los parches de `settings` se leen y escriben en una transacción rw para conservar cambios concurrentes. La revalidación de licencia usa una actualización condicional atómica sobre la clave esperada, por lo que una pestaña no puede revocar ni restaurar el estado de otra. El archivado de un propietario se serializa con el alta de pacientes, y un respaldo con un paciente activo bajo un propietario archivado se rechaza.
 - **Esquema Dexie v4**: las fechas clínicas legacy se normalizan a fecha/hora local antes de continuar usándolas en fichas y sesiones.
 
 ## Problemas encontrados
@@ -50,5 +52,5 @@
 
 - [ ] Probar la instalación PWA en un dispositivo físico (Android/iOS)
 - [ ] Vincular el proyecto a una cuenta Vercel y configurar el dominio permanente
-- [ ] Generar y distribuir códigos de licencia únicos para los primeros clientes
+- [ ] Distribuir la licencia inicial privada y generar códigos únicos para cada cliente adicional
 - [ ] Realizar una prueba de impresión/PDF en la impresora de la clínica

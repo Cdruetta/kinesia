@@ -604,8 +604,12 @@ function validateRelationships(backup: BackupData): string | null {
   const templatesById = recordsById('messageTemplates', backup);
 
   for (const patient of backup.data.patients as Array<Record<string, unknown>>) {
-    if (!ownersById.has(String(patient.ownerId))) {
+    const owner = ownersById.get(String(patient.ownerId));
+    if (!owner) {
       return 'El respaldo contiene un paciente sin su propietario.';
+    }
+    if (!patient.archivedAt && owner.archivedAt) {
+      return 'El respaldo contiene un paciente activo cuyo propietario está archivado.';
     }
   }
 

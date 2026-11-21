@@ -395,16 +395,16 @@ describe('límites demo al reprogramar', () => {
     );
 
     expect(result.original.status).toBe('cancelled');
+    expect(result.original.archivedAt).not.toBeNull();
     expect(result.newAppointment.status).toBe('scheduled');
     expect(await harness.db.appointments.count()).toBe(4);
-    // La cancelación no archiva el original: ambos registros siguen contando
-    // como no archivados. La operación es neutra para la aserción porque el
-    // ID reemplazado se excluye explícitamente del delta.
+    // El original queda archivado lógicamente: el turno que consume cupo es
+    // el reemplazo y la operación conserva el total de registros no archivados.
     expect(
       (await harness.db.appointments.toArray()).filter(
         (appointment) => !appointment.archivedAt
       )
-    ).toHaveLength(4);
+    ).toHaveLength(3);
   });
 
   it('rechaza un reemplazo que agrega un turno y revierte la cancelación', async () => {

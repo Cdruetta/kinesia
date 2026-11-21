@@ -262,21 +262,19 @@ export const appointmentsService = {
           );
         }
 
-        // Marcar el original como cancelado forma parte de la misma
-        // transacción que crea el reemplazo. La aserción excluye explícitamente
-        // ese ID para evaluar el conteo neto (3→3), sin cambiar la semántica
-        // de los límites: todo registro no archivado sigue contando.
+        // El original se cancela y se archiva dentro de la misma transacción
+        // que crea el reemplazo. Así el cupo demo sigue contando todos los
+        // registros no archivados y una reprogramación es neutra (3→3).
         const updatedOriginal: Appointment = {
           ...original,
           status: 'cancelled',
           notes: `${original.notes ? original.notes + ' ' : ''}Reprogramado a ${newStartsAt}.`,
           updatedAt: now,
+          archivedAt: original.archivedAt ?? now,
         };
 
         await tx.table<Appointment>('appointments').put(updatedOriginal);
-        await assertCanCreateLimitedRecord(tx, 'appointments', {
-          excludeRecordId: original.id,
-        });
+        await assertCanCreateLimitedRecord(tx, 'appointments');
         await tx.table<Appointment>('appointments').add(newAppointment);
 
         return { original: updatedOriginal, newAppointment };

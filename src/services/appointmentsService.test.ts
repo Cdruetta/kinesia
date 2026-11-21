@@ -277,6 +277,7 @@ describe('appointmentsService', () => {
       status: 'cancelled',
       startsAt: '2026-03-10T10:00:00',
     });
+    expect(result.original.archivedAt).not.toBeNull();
     expect(result.newAppointment).toMatchObject({
       patientId: 'patient-1',
       ownerId: 'owner-1',

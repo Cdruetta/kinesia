@@ -186,6 +186,17 @@ describe('backupService.validateBackup', () => {
     expect(result).toMatchObject({ valid: false });
     expect(result.error).toContain('sin su propietario');
   });
+
+  it('rechaza un paciente activo cuyo propietario está archivado', () => {
+    const backup = createBackup();
+    const owner = backup.data.owners[0] as Record<string, unknown>;
+    owner.archivedAt = '2026-11-20T12:00:00.000Z';
+
+    const result = backupService.validateBackup(JSON.stringify(backup));
+
+    expect(result).toMatchObject({ valid: false });
+    expect(result.error).toContain('propietario está archivado');
+  });
 });
 
 describe('validación de fechas y turnos', () => {

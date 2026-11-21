@@ -108,19 +108,9 @@ export async function validateLicenseInTransaction(
  * validado es la fuente de verdad. La transacción incluye `settings` para
  * que una activación o revocación concurrente quede serializada con el alta.
  */
-export interface LimitedRecordOptions {
-  /**
-   * Registro que se reemplaza dentro de la misma transacción. Se excluye del
-   * conteo para evaluar el delta neto sin cambiar la semántica de "no
-   * archivado" (por ejemplo, una reprogramación 3→3).
-   */
-  excludeRecordId?: string;
-}
-
 export async function assertCanCreateLimitedRecord(
   transaction: Transaction,
   resource: DemoLimitedResource,
-  options: LimitedRecordOptions = {},
   validator: LicenseValidator = licenseService
 ): Promise<void> {
   assertTransactionScope(transaction, resource);
@@ -159,9 +149,7 @@ export async function assertCanCreateLimitedRecord(
     id: string;
     archivedAt?: string | null;
   }>;
-  const activeCount = records.filter(
-    (record) => !record.archivedAt && record.id !== options.excludeRecordId
-  ).length;
+  const activeCount = records.filter((record) => !record.archivedAt).length;
   const limit = DEMO_LIMIT_BY_RESOURCE[resource];
 
   if (activeCount >= limit) {

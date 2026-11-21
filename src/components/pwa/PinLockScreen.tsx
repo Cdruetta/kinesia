@@ -6,25 +6,45 @@ import { usePin } from '@/hooks/usePin';
 import { Lock } from 'lucide-react';
 
 export function PinLockScreen() {
-  const { locked, attempts, lockedUntil, unlock } = usePin();
+  const {
+    locked,
+    attempts,
+    isTemporarilyLocked,
+    remainingSeconds,
+    unlockPending,
+    unlock,
+  } = usePin();
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
 
   if (!locked) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
-    const valid = await unlock(pin);
-    if (valid) {
+
+    try {
+      const result = await unlock(pin);
+      if (result.status === 'success') {
+        setPin('');
+        return;
+      }
+
       setPin('');
-    } else {
-      setError('PIN incorrecto. Intentá de nuevo.');
+      if (result.status === 'locked') {
+        setError('Todavía hay un bloqueo temporal. Esperá a que termine.');
+      } else if (result.status === 'pending') {
+        setError('Ya hay una verificación en curso.');
+      } else if (result.status === 'unavailable') {
+        setError('El PIN no está configurado correctamente.');
+      } else {
+        setError('PIN incorrecto. Intentá de nuevo.');
+      }
+    } catch {
       setPin('');
+      setError('No se pudo verificar el PIN. Intentá de nuevo.');
     }
   };
-
-  const isLocked = lockedUntil && new Date() < lockedUntil;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background dark:bg-[#1a1625]">
@@ -36,9 +56,9 @@ export function PinLockScreen() {
           <h1 className="font-serif text-2xl font-bold text-ink-main dark:text-violet-50 mb-2">Kinesia</h1>
           <p className="text-sm text-ink-secondary dark:text-violet-200/70 mb-6">Ingresá tu PIN para desbloquear.</p>
 
-          {isLocked && (
+          {isTemporarilyLocked && (
             <div className="mb-4 p-3 rounded-lg bg-warning-bg text-warning-text text-sm">
-              Demasiados intentos. Esperá {Math.ceil((lockedUntil!.getTime() - Date.now()) / 1000)} segundos.
+              Demasiados intentos. Esperá {remainingSeconds} segundos.
             </div>
           )}
 
@@ -46,14 +66,21 @@ export function PinLockScreen() {
             <Input
               type="password"
               value={pin}
-              onChange={(e) => setPin(e.target.value)}
+              onChange={(event) => setPin(event.target.value)}
               placeholder="PIN"
-              disabled={!!isLocked}
+              disabled={isTemporarilyLocked || unlockPending}
               autoFocus
             />
             {error && <p className="text-sm text-error-text">{error}</p>}
-            <Button type="submit" variant="primary" className="w-full" disabled={!!isLocked || pin.length < 4}>
-              Desbloquear
+            <Button
+              type="submit"
+              variant="primary"
+              className="w-full"
+              disabled={
+                isTemporarilyLocked || unlockPending || pin.length < 4
+              }
+            >
+              {unlockPending ? 'Verificando…' : 'Desbloquear'}
             </Button>
           </form>
 

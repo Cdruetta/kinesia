@@ -1,5 +1,5 @@
 import { db } from '@/db/instance';
-import type { Owner } from '@/models';
+import type { Owner, Patient } from '@/models';
 import { normalizeArgentinePhone } from '@/utils/phones';
 import {
   assertCanCreateLimitedRecord,
@@ -64,14 +64,39 @@ export const ownersService = {
 
   /** Archivado lógico. Falla si el propietario tiene pacientes activos. */
   async archive(id: string): Promise<void> {
-    const patients = await db.patients.where('ownerId').equals(id).toArray();
-    const active = patients.filter((p) => !p.archivedAt);
-    if (active.length > 0) {
-      const nombres = active.map((p) => p.name).join(', ');
-      throw new Error(`No se puede archivar: tiene pacientes activos (${nombres}). Archivalos o transferilos primero.`);
+    try {
+      // La comprobación y el archivado se serializan con los altas de
+      // pacientes para que dos pestañas no puedan dejar un paciente activo
+      // asociado a un propietario archivado.
+      await db.transaction('rw', db.owners, db.patients, async (tx) => {
+        const owner = await tx.table<Owner>('owners').get(id);
+        if (!owner) throw new Error('El propietario ya no existe.');
+
+        const patients = await tx
+          .table<Patient>('patients')
+          .where('ownerId')
+          .equals(id)
+          .toArray();
+        const active = patients.filter((patient) => !patient.archivedAt);
+        if (active.length > 0) {
+          const nombres = active.map((patient) => patient.name).join(', ');
+          throw new Error(
+            `No se puede archivar: tiene pacientes activos (${nombres}). Archivalos o transferilos primero.`
+          );
+        }
+
+        const now = new Date().toISOString();
+        await tx.table<Owner>('owners').update(id, {
+          archivedAt: now,
+          updatedAt: now,
+        });
+      });
+    } catch (error) {
+      throw new Error(
+        error instanceof Error ? error.message : String(error),
+        { cause: error }
+      );
     }
-    const now = new Date().toISOString();
-    await db.owners.update(id, { archivedAt: now, updatedAt: now });
   },
 
   async restore(id: string): Promise<void> {

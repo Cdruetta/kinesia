@@ -5,6 +5,7 @@
 ### Agregado
 - Modo freemium con límites transaccionales de 3 propietarios, 5 pacientes y 3 turnos
 - Activación local de licencia por PBKDF2 y soporte para códigos únicos por cliente
+- Licencia comercial inicial habilitada mediante hash, con el código conservado fuera del repositorio
 - Generador de códigos de licencia de alta entropía y su hash
 - Iconos PNG del PWA (192/512 px) y manifiesto actualizado a español
 - Editor de horarios de atención por día
@@ -26,14 +27,19 @@
 - La importación valida tipos, relaciones, IDs y unicidad antes de restaurar
 - Los límites demo se aplican dentro de las transacciones y la restauración de un respaldo excedente se revierte sin perder datos
 - La instantánea de exportación XLSX/CSV es transaccional e incluye registros archivados y versiones clínicas anteriores
+- La reprogramación archiva lógicamente el original para que no eluda el límite demo de turnos
+- Los intentos y bloqueos del PIN persisten, se serializan entre pestañas y se rehidratan al recargar
+- El bloqueo temporal del PIN se revierte automáticamente al vencer y el formulario vuelve a habilitarse
+- Las actualizaciones concurrentes de la configuración y el archivado de propietarios preservan relaciones consistentes
 - La exportación tabular excluye claves de licencia, hashes/sales del PIN y logotipos incrustados
 - Los CSV neutralizan textos que una hoja de cálculo podría interpretar como fórmulas
 - Una licencia manipulada en un respaldo se revalida localmente y se revoca si no es válida
+- La revalidación de licencia no pisa activaciones o desactivaciones concurrentes en otra pestaña
 - La edad histórica del snapshot de una ficha se conserva al editarla
 - Se actualizan las dependencias de compilación para eliminar avisos de seguridad de `glob`/`minimatch`
 
 ### Verificado
-- 168 pruebas aprobadas, 1 omitida
+- 182 pruebas aprobadas, 1 omitida
 - Build de producción con Service Worker y precaché
 - Auditoría de dependencias sin vulnerabilidades conocidas
 - Modo offline: carga, navegación, creación de registros, recursos PWA y descarga de XLSX/CSV

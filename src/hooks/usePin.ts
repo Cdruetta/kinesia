@@ -1,88 +1,130 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSettings } from '@/hooks/useSettings';
-import { settingsService } from '@/services/settingsService';
-import { pinService } from '@/services/pinService';
+import { pinAccessService, type PinUnlockResult } from '@/services/pinAccessService';
+
+function parseLockedUntil(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return null;
+  return new Date(timestamp);
+}
 
 export function usePin() {
   const { data: settings } = useSettings();
-  const [locked, setLocked] = useState(false);
-  const [attempts, setAttempts] = useState(0);
-  const [lockedUntil, setLockedUntil] = useState<Date | null>(null);
-  const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const isPinEnabled = settings?.pinEnabled ?? false;
+  const [locked, setLocked] = useState(isPinEnabled);
+  const [attempts, setAttempts] = useState(settings?.pinAttempts ?? 0);
+  const [lockedUntil, setLockedUntil] = useState<Date | null>(() =>
+    parseLockedUntil(settings?.pinLockedUntil)
+  );
+  const [unlockPending, setUnlockPending] = useState(false);
+  const [clock, setClock] = useState(() => Date.now());
+  const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unlockPendingRef = useRef(false);
 
-  // Bloqueo inicial si el PIN está activo
+  // Rehidrata el estado desde la configuración persistida. Así una recarga o
+  // un segundo control de la aplicación no puede reiniciar el bloqueo.
+  useEffect(() => {
+    setAttempts(settings?.pinAttempts ?? 0);
+    setLockedUntil(parseLockedUntil(settings?.pinLockedUntil));
+  }, [settings?.pinAttempts, settings?.pinLockedUntil]);
+
   useEffect(() => {
     if (isPinEnabled) {
       setLocked(true);
+    } else {
+      setLocked(false);
     }
   }, [isPinEnabled]);
 
-  const unlock = useCallback(async (pin: string): Promise<boolean> => {
-    if (!settings?.pinHash || !settings?.pinSalt) return false;
+  // Programa un nuevo render al vencer el bloqueo temporal. Sin este timer,
+  // el formulario podía quedar deshabilitado hasta que ocurriera otro render.
+  useEffect(() => {
+    if (!lockedUntil) return;
 
-    // Verificar bloqueo temporal
-    if (lockedUntil && new Date() < lockedUntil) {
-      return false;
-    }
-
-    const valid = await pinService.verifyPin(pin, settings.pinSalt, settings.pinHash);
-    if (valid) {
-      setLocked(false);
-      setAttempts(0);
+    const remaining = lockedUntil.getTime() - Date.now();
+    if (remaining <= 0) {
       setLockedUntil(null);
-      await settingsService.update({ pinAttempts: 0, pinLockedUntil: null });
-      return true;
+      setClock(Date.now());
+      return;
     }
 
-    const newAttempts = attempts + 1;
-    setAttempts(newAttempts);
-    await settingsService.update({ pinAttempts: newAttempts });
+    const timer = window.setTimeout(() => {
+      setLockedUntil(null);
+      setClock(Date.now());
+    }, remaining + 10);
+    return () => window.clearTimeout(timer);
+  }, [lockedUntil]);
 
-    // Espera creciente: 0, 0, 0, 5s, 15s, 30s, 60s...
-    if (newAttempts >= 4) {
-      const delay = Math.min(5 * Math.pow(2, newAttempts - 4), 60) * 1000;
-      const until = new Date(Date.now() + delay);
-      setLockedUntil(until);
-      await settingsService.update({ pinLockedUntil: until.toISOString() });
+  const unlock = useCallback(async (pin: string): Promise<PinUnlockResult> => {
+    if (unlockPendingRef.current) {
+      return { status: 'pending' };
     }
 
-    return false;
-  }, [settings, attempts, lockedUntil]);
+    unlockPendingRef.current = true;
+    setUnlockPending(true);
+    try {
+      const result = await pinAccessService.unlock(pin);
+      if (result.status === 'success') {
+        setLocked(false);
+        setAttempts(0);
+        setLockedUntil(null);
+      } else if (result.status === 'invalid') {
+        setAttempts(result.attempts);
+        setLockedUntil(parseLockedUntil(result.lockedUntil));
+      } else if (result.status === 'locked') {
+        setAttempts(result.attempts);
+        setLockedUntil(parseLockedUntil(result.lockedUntil));
+      }
+      return result;
+    } finally {
+      unlockPendingRef.current = false;
+      setUnlockPending(false);
+    }
+  }, []);
 
   const lock = useCallback(() => {
     if (isPinEnabled) setLocked(true);
   }, [isPinEnabled]);
 
+  const autoLockMinutes = settings?.autoLockMinutes ?? 0;
   const resetInactivityTimer = useCallback(() => {
     if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
-    const minutes = settings?.autoLockMinutes ?? 0;
-    if (minutes > 0 && isPinEnabled) {
+    if (autoLockMinutes > 0 && isPinEnabled) {
       inactivityTimer.current = setTimeout(() => {
         setLocked(true);
-      }, minutes * 60 * 1000);
+      }, autoLockMinutes * 60 * 1000);
     }
-  }, [settings, isPinEnabled]);
+  }, [autoLockMinutes, isPinEnabled]);
 
   useEffect(() => {
     if (isPinEnabled) {
       resetInactivityTimer();
       const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
       const handler = () => resetInactivityTimer();
-      events.forEach((e) => window.addEventListener(e, handler));
+      events.forEach((event) => window.addEventListener(event, handler));
       return () => {
-        events.forEach((e) => window.removeEventListener(e, handler));
+        events.forEach((event) => window.removeEventListener(event, handler));
         if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
       };
     }
   }, [isPinEnabled, resetInactivityTimer]);
+
+  const isTemporarilyLocked = Boolean(
+    lockedUntil && lockedUntil.getTime() > clock
+  );
+  const remainingSeconds = isTemporarilyLocked
+    ? Math.ceil((lockedUntil!.getTime() - clock) / 1000)
+    : 0;
 
   return {
     locked,
     isPinEnabled,
     attempts,
     lockedUntil,
+    isTemporarilyLocked,
+    remainingSeconds,
+    unlockPending,
     unlock,
     lock,
   };
